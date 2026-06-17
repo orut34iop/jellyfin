@@ -10,6 +10,7 @@ using System.Text.Json.Serialization;
 using System.Threading;
 using Jellyfin.Data.Enums;
 using Jellyfin.Extensions;
+using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaEncoding;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Dlna;
@@ -330,7 +331,9 @@ namespace MediaBrowser.Controller.Entities.TV
                 if (SourceType == SourceType.Library || SourceType == SourceType.LiveTV)
                 {
                     var libraryOptions = LibraryManager.GetLibraryOptions(this);
-                    if (libraryOptions.EnableEmbeddedEpisodeInfos && string.Equals(Container, "mp4", StringComparison.OrdinalIgnoreCase))
+                    if (!LocalMetadataOnlyImportPolicy.IsEnabled(libraryOptions)
+                        && libraryOptions.EnableEmbeddedEpisodeInfos
+                        && string.Equals(Container, "mp4", StringComparison.OrdinalIgnoreCase))
                     {
                         try
                         {

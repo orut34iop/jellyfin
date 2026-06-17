@@ -168,6 +168,13 @@ namespace MediaBrowser.Providers.Manager
         /// <inheritdoc/>
         public async Task SaveImage(BaseItem item, string url, ImageType type, int? imageIndex, CancellationToken cancellationToken)
         {
+            if (LocalMetadataOnlyImportPolicy.IsEnabledForItem(item, _libraryManager)
+                && LocalMetadataOnlyImportPolicy.IsRemoteHttpPath(url))
+            {
+                _logger.LogDebug("LocalMetadataOnlyImport enabled; skipping remote image {Url}", url);
+                return;
+            }
+
             using (await _imageSaveLock.LockAsync(url, cancellationToken).ConfigureAwait(false))
             {
                 if (_memoryCache.TryGetValue(url, out (string ContentType, byte[] ImageContents)? cachedValue)
@@ -279,6 +286,11 @@ namespace MediaBrowser.Providers.Manager
         /// <inheritdoc/>
         public async Task<IEnumerable<RemoteImageInfo>> GetAvailableRemoteImages(BaseItem item, RemoteImageQuery query, CancellationToken cancellationToken)
         {
+            if (LocalMetadataOnlyImportPolicy.IsEnabledForItem(item, _libraryManager))
+            {
+                return Enumerable.Empty<RemoteImageInfo>();
+            }
+
             var providers = GetRemoteImageProviders(item, query.IncludeDisabledProviders);
 
             if (!string.IsNullOrEmpty(query.ProviderName))
@@ -383,8 +395,14 @@ namespace MediaBrowser.Providers.Manager
         {
             var typeOptions = libraryOptions.GetTypeOptions(item.GetType().Name);
             var fetcherOrder = typeOptions?.ImageFetcherOrder ?? options.ImageFetcherOrder;
+            var imageProviders = _imageProviders.AsEnumerable();
 
-            return _imageProviders.Where(i => CanRefreshImages(i, item, typeOptions, refreshOptions, includeDisabled))
+            if (LocalMetadataOnlyImportPolicy.IsEnabled(libraryOptions))
+            {
+                imageProviders = imageProviders.Where(i => i is ILocalImageProvider);
+            }
+
+            return imageProviders.Where(i => CanRefreshImages(i, item, typeOptions, refreshOptions, includeDisabled))
                 .OrderBy(i => GetConfiguredOrder(fetcherOrder, i.Name))
                 .ThenBy(GetDefaultOrder);
         }
@@ -443,8 +461,14 @@ namespace MediaBrowser.Providers.Manager
             var localMetadataReaderOrder = libraryOptions.LocalMetadataReaderOrder ?? globalMetadataOptions.LocalMetadataReaderOrder;
             var typeOptions = libraryOptions.GetTypeOptions(item.GetType().Name);
             var metadataFetcherOrder = typeOptions?.MetadataFetcherOrder ?? globalMetadataOptions.MetadataFetcherOrder;
+            var metadataProviders = _metadataProviders.OfType<IMetadataProvider<T>>();
 
-            return _metadataProviders.OfType<IMetadataProvider<T>>()
+            if (LocalMetadataOnlyImportPolicy.IsEnabled(libraryOptions))
+            {
+                metadataProviders = metadataProviders.Where(i => i is ILocalMetadataProvider);
+            }
+
+            return metadataProviders
                 .Where(i => CanRefreshMetadata(i, item, typeOptions, includeDisabled, forceEnableInternetMetadata))
                 .OrderBy(i =>
                     // local and remote providers will be interleaved in the final order

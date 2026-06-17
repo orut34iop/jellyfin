@@ -182,7 +182,7 @@ namespace MediaBrowser.Providers.Manager
                     id.IsAutomated = refreshOptions.IsAutomated;
 
                     var hasMetadataSavers = ProviderManager.GetMetadataSavers(item, libraryOptions).Any();
-                    var result = await RefreshWithProviders(metadataResult, id, refreshOptions, providers, ImageProvider, hasMetadataSavers, cancellationToken).ConfigureAwait(false);
+                    var result = await RefreshWithProviders(metadataResult, id, refreshOptions, providers, ImageProvider, hasMetadataSavers, libraryOptions, cancellationToken).ConfigureAwait(false);
 
                     updateType |= result.UpdateType;
                     if (result.Failures > 0)
@@ -724,6 +724,7 @@ namespace MediaBrowser.Providers.Manager
             ICollection<IMetadataProvider> providers,
             ItemImageProvider imageService,
             bool isSavingMetadata,
+            LibraryOptions libraryOptions,
             CancellationToken cancellationToken)
         {
             var refreshResult = new RefreshResult
@@ -778,6 +779,13 @@ namespace MediaBrowser.Providers.Manager
                             {
                                 try
                                 {
+                                    if (LocalMetadataOnlyImportPolicy.IsEnabled(libraryOptions)
+                                        && LocalMetadataOnlyImportPolicy.IsRemoteHttpPath(remoteImage.Url))
+                                    {
+                                        Logger.LogDebug("LocalMetadataOnlyImport enabled; skipping remote image {Url}", remoteImage.Url);
+                                        continue;
+                                    }
+
                                     if (item.ImageInfos.Any(x => x.Type == remoteImage.Type)
                                         && !options.IsReplacingImage(remoteImage.Type))
                                     {

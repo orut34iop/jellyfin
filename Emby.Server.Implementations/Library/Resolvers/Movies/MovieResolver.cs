@@ -16,6 +16,7 @@ using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Controller.Resolvers;
+using MediaBrowser.Model.Configuration;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.IO;
 using Microsoft.Extensions.Logging;
@@ -67,7 +68,7 @@ namespace Emby.Server.Implementations.Library.Resolvers.Movies
             CollectionType? collectionType,
             IDirectoryService directoryService)
         {
-            var result = ResolveMultipleInternal(parent, files, collectionType);
+            var result = ResolveMultipleInternal(parent, files, collectionType, GetLibraryOptions(parent));
 
             if (result is not null)
             {
@@ -188,7 +189,8 @@ namespace Emby.Server.Implementations.Library.Resolvers.Movies
         private MultiItemResolverResult ResolveMultipleInternal(
             Folder parent,
             List<FileSystemMetadata> files,
-            CollectionType? collectionType)
+            CollectionType? collectionType,
+            LibraryOptions libraryOptions)
         {
             if (IsInvalid(parent, collectionType))
             {
@@ -197,12 +199,12 @@ namespace Emby.Server.Implementations.Library.Resolvers.Movies
 
             if (collectionType is CollectionType.musicvideos)
             {
-                return ResolveVideos<MusicVideo>(parent, files, true, collectionType, false);
+                return ResolveVideos<MusicVideo>(parent, files, true, collectionType, false, libraryOptions);
             }
 
             if (collectionType == CollectionType.homevideos || collectionType == CollectionType.photos)
             {
-                return ResolveVideos<Video>(parent, files, false, collectionType, false);
+                return ResolveVideos<Video>(parent, files, false, collectionType, false, libraryOptions);
             }
 
             if (collectionType is null)
@@ -210,7 +212,7 @@ namespace Emby.Server.Implementations.Library.Resolvers.Movies
                 // Owned items should just use the plain video type
                 if (parent is null)
                 {
-                    return ResolveVideos<Video>(parent, files, false, collectionType, false);
+                    return ResolveVideos<Video>(parent, files, false, collectionType, false, libraryOptions);
                 }
 
                 if (parent is Series || parent.GetParents().OfType<Series>().Any())
@@ -218,17 +220,17 @@ namespace Emby.Server.Implementations.Library.Resolvers.Movies
                     return null;
                 }
 
-                return ResolveVideos<Movie>(parent, files, false, collectionType, true);
+                return ResolveVideos<Movie>(parent, files, false, collectionType, true, libraryOptions);
             }
 
             if (collectionType == CollectionType.movies)
             {
-                return ResolveVideos<Movie>(parent, files, true, collectionType, true);
+                return ResolveVideos<Movie>(parent, files, true, collectionType, true, libraryOptions);
             }
 
             if (collectionType == CollectionType.tvshows)
             {
-                return ResolveVideos<Episode>(parent, files, false, collectionType, true);
+                return ResolveVideos<Episode>(parent, files, false, collectionType, true, libraryOptions);
             }
 
             return null;
@@ -239,7 +241,8 @@ namespace Emby.Server.Implementations.Library.Resolvers.Movies
             IEnumerable<FileSystemMetadata> fileSystemEntries,
             bool supportMultiEditions,
             CollectionType? collectionType,
-            bool parseName)
+            bool parseName,
+            LibraryOptions libraryOptions)
             where T : Video, new()
         {
             var files = new List<FileSystemMetadata>();
@@ -305,7 +308,7 @@ namespace Emby.Server.Implementations.Library.Resolvers.Movies
                     LocalAlternateVersions = video.AlternateVersions.Select(i => i.Path).ToArray()
                 };
 
-                SetVideoType(videoItem, firstVideo);
+                SetVideoType(videoItem, firstVideo, libraryOptions);
                 Set3DFormat(videoItem, firstVideo);
 
                 result.Items.Add(videoItem);
@@ -456,7 +459,7 @@ namespace Emby.Server.Implementations.Library.Resolvers.Movies
             // TODO: Allow GetMultiDiscMovie in here
             const bool SupportsMultiVersion = true;
 
-            var result = ResolveVideos<T>(parent, fileSystemEntries, SupportsMultiVersion, collectionType, parseName) ??
+            var result = ResolveVideos<T>(parent, fileSystemEntries, SupportsMultiVersion, collectionType, parseName, libraryOptions) ??
                 new MultiItemResolverResult();
 
             var isPhotosCollection = collectionType == CollectionType.homevideos || collectionType == CollectionType.photos;
@@ -480,7 +483,7 @@ namespace Emby.Server.Implementations.Library.Resolvers.Movies
             }
             else if (result.Items.Count == 0 && multiDiscFolders.Count > 0)
             {
-                return GetMultiDiscMovie<T>(multiDiscFolders, directoryService);
+                return GetMultiDiscMovie<T>(multiDiscFolders, directoryService, libraryOptions);
             }
 
             return null;
@@ -491,8 +494,9 @@ namespace Emby.Server.Implementations.Library.Resolvers.Movies
         /// </summary>
         /// <param name="multiDiscFolders">The folders.</param>
         /// <param name="directoryService">The directory service.</param>
+        /// <param name="libraryOptions">The library options.</param>
         /// <returns>``0.</returns>
-        private T GetMultiDiscMovie<T>(List<FileSystemMetadata> multiDiscFolders, IDirectoryService directoryService)
+        private T GetMultiDiscMovie<T>(List<FileSystemMetadata> multiDiscFolders, IDirectoryService directoryService, LibraryOptions libraryOptions)
                where T : Video, new()
         {
             var videoTypes = new List<VideoType>();
@@ -560,9 +564,19 @@ namespace Emby.Server.Implementations.Library.Resolvers.Movies
                 Name = result[0].Name
             };
 
-            SetIsoType(returnVideo);
+            SetIsoType(returnVideo, libraryOptions);
 
             return returnVideo;
+        }
+
+        private static LibraryOptions GetLibraryOptions(Folder parent)
+        {
+            if (parent is null || BaseItem.LibraryManager is null)
+            {
+                return new LibraryOptions();
+            }
+
+            return BaseItem.LibraryManager.GetLibraryOptions(parent);
         }
 
         private bool IsInvalid(Folder parent, CollectionType? collectionType)

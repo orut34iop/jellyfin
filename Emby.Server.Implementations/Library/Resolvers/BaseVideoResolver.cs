@@ -11,6 +11,7 @@ using Emby.Naming.Video;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Providers;
+using MediaBrowser.Model.Configuration;
 using MediaBrowser.Model.Entities;
 using Microsoft.Extensions.Logging;
 
@@ -128,7 +129,7 @@ namespace Emby.Server.Implementations.Library.Resolvers
             }
             else
             {
-                SetVideoType(video, videoInfo);
+                SetVideoType(video, videoInfo, args.LibraryOptions);
             }
 
             Set3DFormat(video, videoInfo);
@@ -136,7 +137,7 @@ namespace Emby.Server.Implementations.Library.Resolvers
             return video;
         }
 
-        protected void SetVideoType(Video video, VideoFileInfo videoInfo)
+        protected void SetVideoType(Video video, VideoFileInfo videoInfo, LibraryOptions libraryOptions)
         {
             var extension = Path.GetExtension(video.Path.AsSpan());
             video.VideoType = extension.Equals(".iso", StringComparison.OrdinalIgnoreCase)
@@ -159,10 +160,10 @@ namespace Emby.Server.Implementations.Library.Resolvers
                 }
             }
 
-            SetIsoType(video);
+            SetIsoType(video, libraryOptions);
         }
 
-        protected void SetIsoType(Video video)
+        protected void SetIsoType(Video video, LibraryOptions libraryOptions)
         {
             if (video.VideoType == VideoType.Iso)
             {
@@ -176,6 +177,12 @@ namespace Emby.Server.Implementations.Library.Resolvers
                 }
                 else
                 {
+                    if (LocalMetadataOnlyImportPolicy.IsEnabled(libraryOptions))
+                    {
+                        _logger.LogDebug("LocalMetadataOnlyImport enabled; skipping ISO type probing for {Path}", video.Path ?? video.Name);
+                        return;
+                    }
+
                     try
                     {
                         // use disc-utils, both DVDs and BDs use UDF filesystem

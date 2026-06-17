@@ -198,6 +198,25 @@ namespace Jellyfin.Providers.Tests.Manager
             GetImageProviders_CanRefreshImages_Tester(providerType, true, expected, baseItemEnabled: enabled);
         }
 
+        [Fact]
+        public void GetImageProviders_LocalMetadataOnlyImport_ReturnsOnlyLocalImageProviders()
+        {
+            var item = new Movie();
+            var localProvider = MockIImageProvider<ILocalImageProvider>("local", item);
+            var remoteProvider = MockIImageProvider<IRemoteImageProvider>("remote", item);
+            var dynamicProvider = MockIImageProvider<IDynamicImageProvider>("dynamic", item);
+            var libraryOptions = new LibraryOptions { LocalMetadataOnlyImport = true };
+
+            using var providerManager = GetProviderManager(libraryOptions: libraryOptions);
+            AddParts(providerManager, imageProviders: new[] { localProvider, remoteProvider, dynamicProvider });
+
+            var refreshOptions = new ImageRefreshOptions(Mock.Of<IDirectoryService>(MockBehavior.Strict));
+            var actualProviders = providerManager.GetImageProviders(item, refreshOptions).ToArray();
+
+            Assert.Single(actualProviders);
+            Assert.Same(localProvider, actualProviders[0]);
+        }
+
         private static void GetImageProviders_CanRefreshImages_Tester(
             string providerType,
             bool supports,
@@ -375,6 +394,24 @@ namespace Jellyfin.Providers.Tests.Manager
         public void GetMetadataProviders_CanRefreshMetadataOwned(string providerType, bool expected)
         {
             GetMetadataProviders_CanRefreshMetadata_Tester(providerType, expected, ownedItem: true);
+        }
+
+        [Fact]
+        public void GetMetadataProviders_LocalMetadataOnlyImport_ReturnsOnlyLocalMetadataProviders()
+        {
+            var item = new MetadataTestItem();
+            var localProvider = MockIMetadataProviderMapper<MetadataTestItem, MetadataTestItemInfo>(nameof(ILocalMetadataProvider), "local");
+            var remoteProvider = MockIMetadataProviderMapper<MetadataTestItem, MetadataTestItemInfo>(nameof(IRemoteMetadataProvider), "remote");
+            var customProvider = MockIMetadataProviderMapper<MetadataTestItem, MetadataTestItemInfo>(nameof(ICustomMetadataProvider), "custom");
+            var libraryOptions = new LibraryOptions { LocalMetadataOnlyImport = true };
+
+            using var providerManager = GetProviderManager(libraryOptions: libraryOptions);
+            AddParts(providerManager, metadataProviders: new[] { localProvider, remoteProvider, customProvider });
+
+            var actualProviders = providerManager.GetMetadataProviders<MetadataTestItem>(item, libraryOptions).ToArray();
+
+            Assert.Single(actualProviders);
+            Assert.Same(localProvider, actualProviders[0]);
         }
 
         private static void GetMetadataProviders_CanRefreshMetadata_Tester(

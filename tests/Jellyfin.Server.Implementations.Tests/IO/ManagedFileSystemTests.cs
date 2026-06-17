@@ -6,6 +6,7 @@ using AutoFixture;
 using AutoFixture.AutoMoq;
 using Emby.Server.Implementations.IO;
 using Jellyfin.Extensions;
+using MediaBrowser.Controller.Library;
 using Xunit;
 
 namespace Jellyfin.Server.Implementations.Tests.IO;
@@ -105,15 +106,58 @@ public class ManagedFileSystemTests
     {
         Skip.If(OperatingSystem.IsWindows());
 
+        var previous = Environment.GetEnvironmentVariable(LocalMetadataOnlyImportPolicy.EnvironmentVariableName);
+        Environment.SetEnvironmentVariable(LocalMetadataOnlyImportPolicy.EnvironmentVariableName, null);
+
         string testFileDir = Path.Combine(Path.GetTempPath(), "jellyfin-test-data");
         string testFileName = Path.Combine(testFileDir, Path.GetRandomFileName() + "-danglingsym.link");
 
-        Directory.CreateDirectory(testFileDir);
-        Assert.Equal(0, symlink("thispathdoesntexist", testFileName));
-        Assert.True(File.Exists(testFileName));
+        try
+        {
+            Directory.CreateDirectory(testFileDir);
+            Assert.Equal(0, symlink("thispathdoesntexist", testFileName));
+            Assert.True(File.Exists(testFileName));
 
-        var metadata = _sut.GetFileInfo(testFileName);
-        Assert.False(metadata.Exists);
+            var metadata = _sut.GetFileInfo(testFileName);
+            Assert.False(metadata.Exists);
+        }
+        finally
+        {
+            File.Delete(testFileName);
+            Environment.SetEnvironmentVariable(LocalMetadataOnlyImportPolicy.EnvironmentVariableName, previous);
+        }
+    }
+
+    [SkippableFact]
+    public void GetFileInfo_LocalMetadataOnlyImportDanglingVideoSymlink_ExistsWithPlaceholderMetadata()
+    {
+        Skip.If(OperatingSystem.IsWindows());
+
+        var previous = Environment.GetEnvironmentVariable(LocalMetadataOnlyImportPolicy.EnvironmentVariableName);
+        Environment.SetEnvironmentVariable(LocalMetadataOnlyImportPolicy.EnvironmentVariableName, "true");
+
+        string testFileDir = Path.Combine(Path.GetTempPath(), "jellyfin-test-data");
+        string testFileName = Path.Combine(testFileDir, Path.GetRandomFileName() + ".iso");
+
+        try
+        {
+            Directory.CreateDirectory(testFileDir);
+            Assert.Equal(0, symlink("thispathdoesntexist", testFileName));
+            Assert.True(File.Exists(testFileName));
+
+            var metadata = _sut.GetFileInfo(testFileName);
+
+            Assert.True(metadata.Exists);
+            Assert.False(metadata.IsDirectory);
+            Assert.Equal(LocalMetadataOnlyImportPolicy.PlaceholderVideoLength, metadata.Length);
+            Assert.Equal(LocalMetadataOnlyImportPolicy.StableFileTimestampUtc, metadata.CreationTimeUtc);
+            Assert.Equal(LocalMetadataOnlyImportPolicy.StableFileTimestampUtc, metadata.LastWriteTimeUtc);
+        }
+        finally
+        {
+            File.Delete(testFileName);
+            Environment.SetEnvironmentVariable(LocalMetadataOnlyImportPolicy.EnvironmentVariableName, previous);
+        }
     }
 
     [SuppressMessage("Naming Rules", "SA1300:ElementMustBeginWithUpperCaseLetter", Justification = "Have to")]

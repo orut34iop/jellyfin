@@ -7,6 +7,7 @@ using System.Security;
 using Jellyfin.Extensions;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller.IO;
+using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.IO;
 using Microsoft.Extensions.Logging;
 
@@ -248,6 +249,19 @@ namespace Emby.Server.Implementations.IO
                 Extension = info.Extension,
                 Name = info.Name
             };
+
+            if (info is FileInfo linkInfo
+                && linkInfo.LinkTarget is not null
+                && LocalMetadataOnlyImportPolicy.IsEnvironmentEnabled()
+                && LocalMetadataOnlyImportPolicy.IsVideoLikePath(linkInfo.FullName))
+            {
+                result.Exists = true;
+                result.IsDirectory = false;
+                result.Length = LocalMetadataOnlyImportPolicy.PlaceholderVideoLength;
+                result.CreationTimeUtc = LocalMetadataOnlyImportPolicy.StableFileTimestampUtc;
+                result.LastWriteTimeUtc = LocalMetadataOnlyImportPolicy.StableFileTimestampUtc;
+                return result;
+            }
 
             if (result.Exists)
             {

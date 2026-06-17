@@ -153,6 +153,11 @@ namespace MediaBrowser.Providers.Manager
 
             var result = new RefreshResult { UpdateType = ItemUpdateType.None };
 
+            if (LocalMetadataOnlyImportPolicy.IsEnabled(libraryOptions))
+            {
+                return result;
+            }
+
             var typeName = item.GetType().Name;
             var typeOptions = libraryOptions.GetTypeOptions(typeName) ?? new TypeOptions { Type = typeName };
 

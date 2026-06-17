@@ -2072,11 +2072,19 @@ namespace Emby.Server.Implementations.Library
                 return;
             }
 
+            var localMetadataOnlyImport = LocalMetadataOnlyImportPolicy.IsEnabledForItem(item, this);
+
             foreach (var img in outdated)
             {
                 var image = img;
                 if (!img.IsLocalFile)
                 {
+                    if (localMetadataOnlyImport)
+                    {
+                        _logger.LogDebug("LocalMetadataOnlyImport enabled; skipping remote image {Url}", img.Path);
+                        continue;
+                    }
+
                     try
                     {
                         var index = item.GetImageIndex(img);
@@ -2987,6 +2995,13 @@ namespace Emby.Server.Implementations.Library
 
         public async Task<ItemImageInfo> ConvertImageToLocal(BaseItem item, ItemImageInfo image, int imageIndex, bool removeOnFailure)
         {
+            if (LocalMetadataOnlyImportPolicy.IsEnabledForItem(item, this)
+                && image.Path.Split('|').Any(LocalMetadataOnlyImportPolicy.IsRemoteHttpPath))
+            {
+                _logger.LogDebug("LocalMetadataOnlyImport enabled; skipping remote image {Url}", image.Path);
+                return image;
+            }
+
             foreach (var url in image.Path.Split('|'))
             {
                 try

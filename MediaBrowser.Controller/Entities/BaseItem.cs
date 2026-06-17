@@ -1132,7 +1132,9 @@ namespace MediaBrowser.Controller.Entities
             // the correct path even if symlinks are in use. Calling ResolveLinkTarget on a non-link
             // path will return null, so it's safe to check for all paths.
             var itemPath = item.Path;
-            if (protocol is MediaProtocol.File && FileSystemHelper.ResolveLinkTarget(itemPath, returnFinalTarget: true) is { Exists: true } linkInfo)
+            if (protocol is MediaProtocol.File
+                && !(LocalMetadataOnlyImportPolicy.IsEnabledForItem(item, LibraryManager) && LocalMetadataOnlyImportPolicy.IsVideoLikePath(itemPath))
+                && FileSystemHelper.ResolveLinkTarget(itemPath, returnFinalTarget: true) is { Exists: true } linkInfo)
             {
                 itemPath = linkInfo.FullName;
             }
