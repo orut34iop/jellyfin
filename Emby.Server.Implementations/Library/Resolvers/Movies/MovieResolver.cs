@@ -310,6 +310,7 @@ namespace Emby.Server.Implementations.Library.Resolvers.Movies
 
                 SetVideoType(videoItem, firstVideo, libraryOptions);
                 Set3DFormat(videoItem, firstVideo);
+                SetEpisodeParentInfo(videoItem, parent);
 
                 result.Items.Add(videoItem);
             }
@@ -317,6 +318,39 @@ namespace Emby.Server.Implementations.Library.Resolvers.Movies
             result.ExtraFiles.AddRange(files.Where(i => !ContainsFile(resolverResult, i)));
 
             return result;
+        }
+
+        private static void SetEpisodeParentInfo(Video item, Folder parent)
+        {
+            if (item is not Episode episode || parent is null)
+            {
+                return;
+            }
+
+            var season = parent as Season ?? parent.GetParents().OfType<Season>().FirstOrDefault();
+            var series = parent as Series ?? parent.GetParents().OfType<Series>().FirstOrDefault();
+
+            if (series is not null)
+            {
+                episode.SeriesId = series.Id;
+                episode.SeriesName = series.Name;
+            }
+            else if (season is not null && season.SeriesId != Guid.Empty)
+            {
+                episode.SeriesId = season.SeriesId;
+                episode.SeriesName = season.SeriesName;
+            }
+
+            if (season is not null)
+            {
+                episode.SeasonId = season.Id;
+                episode.SeasonName = season.Name;
+
+                if (!episode.ParentIndexNumber.HasValue)
+                {
+                    episode.ParentIndexNumber = season.IndexNumber;
+                }
+            }
         }
 
         private static bool ContainsFile(IReadOnlyList<VideoInfo> result, FileSystemMetadata file)
