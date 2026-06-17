@@ -12,6 +12,7 @@ using Jellyfin.Extensions;
 using MediaBrowser.Common.Extensions;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Audio;
+using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaSegments;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model;
@@ -53,6 +54,12 @@ public class MediaSegmentManager : IMediaSegmentManager
     /// <inheritdoc/>
     public async Task RunSegmentPluginProviders(BaseItem baseItem, LibraryOptions libraryOptions, bool forceOverwrite, CancellationToken cancellationToken)
     {
+        if (LocalMetadataOnlyImportPolicy.IsEnabled(libraryOptions))
+        {
+            _logger.LogDebug("LocalMetadataOnlyImport enabled; skipping media segment extraction for {MediaPath}", baseItem.Path);
+            return;
+        }
+
         var providers = _segmentProviders
             .Where(e => !libraryOptions.DisabledMediaSegmentProviders.Contains(GetProviderId(e.Name)))
             .OrderBy(i =>

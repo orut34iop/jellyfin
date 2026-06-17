@@ -58,6 +58,12 @@ public class MediaSegmentExtractionTask : IScheduledTask
 
         progress.Report(0);
 
+        if (LocalMetadataOnlyImportPolicy.IsEnvironmentEnabled())
+        {
+            progress.Report(100);
+            return;
+        }
+
         var pagesize = 100;
 
         var query = new InternalItemsQuery
@@ -88,10 +94,18 @@ public class MediaSegmentExtractionTask : IScheduledTask
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var item = baseItems[i];
+                var libraryOptions = _libraryManager.GetLibraryOptions(item);
+                if (LocalMetadataOnlyImportPolicy.IsEnabled(libraryOptions))
+                {
+                    numComplete++;
+                    double skippedPercent = (double)numComplete / numberOfVideos;
+                    progress.Report(100 * skippedPercent);
+                    continue;
+                }
+
                 // Only local files supported
                 if (item.IsFileProtocol && File.Exists(item.Path))
                 {
-                    var libraryOptions = _libraryManager.GetLibraryOptions(item);
                     await _mediaSegmentManager.RunSegmentPluginProviders(item, libraryOptions, false, cancellationToken).ConfigureAwait(false);
                 }
 
