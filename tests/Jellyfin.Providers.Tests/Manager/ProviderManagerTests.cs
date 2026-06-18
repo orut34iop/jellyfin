@@ -16,6 +16,7 @@ using MediaBrowser.Controller.MediaSegments;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Controller.Subtitles;
 using MediaBrowser.Model.Configuration;
+using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.IO;
 using MediaBrowser.Providers.Manager;
 using Microsoft.Extensions.Caching.Memory;
@@ -215,6 +216,37 @@ namespace Jellyfin.Providers.Tests.Manager
 
             Assert.Single(actualProviders);
             Assert.Same(localProvider, actualProviders[0]);
+        }
+
+        [Fact]
+        public async Task SaveImage_LocalMetadataOnlyImportRemoteUrl_DoesNotCreateHttpClient()
+        {
+            var item = new Movie();
+            var httpClientFactory = new Mock<IHttpClientFactory>(MockBehavior.Strict);
+            var libraryManager = new Mock<ILibraryManager>(MockBehavior.Strict);
+            libraryManager.Setup(i => i.GetLibraryOptions(item))
+                .Returns(new LibraryOptions { LocalMetadataOnlyImport = true });
+            var serverConfigurationManager = new Mock<IServerConfigurationManager>(MockBehavior.Strict);
+            serverConfigurationManager.Setup(i => i.Configuration)
+                .Returns(new ServerConfiguration());
+
+            using var providerManager = new ProviderManager(
+                httpClientFactory.Object,
+                Mock.Of<ISubtitleManager>(),
+                serverConfigurationManager.Object,
+                Mock.Of<ILibraryMonitor>(),
+                _logger,
+                Mock.Of<IFileSystem>(),
+                Mock.Of<IServerApplicationPaths>(),
+                libraryManager.Object,
+                Mock.Of<IBaseItemManager>(),
+                Mock.Of<ILyricManager>(),
+                Mock.Of<IMemoryCache>(),
+                Mock.Of<IMediaSegmentManager>());
+
+            await providerManager.SaveImage(item, "https://example.invalid/poster.jpg", ImageType.Primary, null, CancellationToken.None);
+
+            httpClientFactory.Verify(i => i.CreateClient(It.IsAny<string>()), Times.Never);
         }
 
         private static void GetImageProviders_CanRefreshImages_Tester(

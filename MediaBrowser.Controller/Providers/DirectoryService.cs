@@ -19,14 +19,19 @@ namespace MediaBrowser.Controller.Providers
 
         private readonly IFileSystem _fileSystem;
 
-        public DirectoryService(IFileSystem fileSystem)
+        public DirectoryService(IFileSystem fileSystem, bool skipResolvingVideoSymlinks = false)
         {
             _fileSystem = fileSystem;
+            SkipResolvingVideoSymlinks = skipResolvingVideoSymlinks;
         }
+
+        public bool SkipResolvingVideoSymlinks { get; }
 
         public FileSystemMetadata[] GetFileSystemEntries(string path)
         {
-            return _cache.GetOrAdd(path, static (p, fileSystem) => fileSystem.GetFileSystemEntries(p).ToArray(), _fileSystem);
+            return SkipResolvingVideoSymlinks
+                ? _cache.GetOrAdd(path, static (p, fileSystem) => fileSystem.GetFileSystemEntries(p, false, true).ToArray(), _fileSystem)
+                : _cache.GetOrAdd(path, static (p, fileSystem) => fileSystem.GetFileSystemEntries(p).ToArray(), _fileSystem);
         }
 
         public List<FileSystemMetadata> GetDirectories(string path)
@@ -77,7 +82,9 @@ namespace MediaBrowser.Controller.Providers
         {
             if (!_fileCache.TryGetValue(path, out var result))
             {
-                var file = _fileSystem.GetFileSystemInfo(path);
+                var file = SkipResolvingVideoSymlinks
+                    ? _fileSystem.GetFileSystemInfo(path, true)
+                    : _fileSystem.GetFileSystemInfo(path);
                 if (file?.Exists ?? false)
                 {
                     result = file;

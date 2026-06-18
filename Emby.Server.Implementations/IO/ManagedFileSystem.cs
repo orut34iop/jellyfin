@@ -184,18 +184,22 @@ namespace Emby.Server.Implementations.IO
         /// <remarks>If the specified path points to a directory, the returned <see cref="FileSystemMetadata"/> object's
         /// <see cref="FileSystemMetadata.IsDirectory"/> property will be set to true and all other properties will reflect the properties of the directory.</remarks>
         public virtual FileSystemMetadata GetFileSystemInfo(string path)
+            => GetFileSystemInfo(path, false);
+
+        /// <inheritdoc />
+        public virtual FileSystemMetadata GetFileSystemInfo(string path, bool skipResolvingVideoSymlinks)
         {
             // Take a guess to try and avoid two file system hits, but we'll double-check by calling Exists
             if (Path.HasExtension(path))
             {
                 var fileInfo = new FileInfo(path);
 
-                if (fileInfo.Exists)
+                if (fileInfo.Exists || IsLocalMetadataOnlyVideoSymlink(fileInfo, skipResolvingVideoSymlinks))
                 {
-                    return GetFileSystemMetadata(fileInfo);
+                    return GetFileSystemMetadata(fileInfo, skipResolvingVideoSymlinks);
                 }
 
-                return GetFileSystemMetadata(new DirectoryInfo(path));
+                return GetFileSystemMetadata(new DirectoryInfo(path), skipResolvingVideoSymlinks);
             }
             else
             {
@@ -203,10 +207,10 @@ namespace Emby.Server.Implementations.IO
 
                 if (fileInfo.Exists)
                 {
-                    return GetFileSystemMetadata(fileInfo);
+                    return GetFileSystemMetadata(fileInfo, skipResolvingVideoSymlinks);
                 }
 
-                return GetFileSystemMetadata(new FileInfo(path));
+                return GetFileSystemMetadata(new FileInfo(path), skipResolvingVideoSymlinks);
             }
         }
 
@@ -217,12 +221,12 @@ namespace Emby.Server.Implementations.IO
         /// <returns>A <see cref="FileSystemMetadata"/> object.</returns>
         /// <remarks><para>If the specified path points to a directory, the returned <see cref="FileSystemMetadata"/> object's
         /// <see cref="FileSystemMetadata.IsDirectory"/> property and the <see cref="FileSystemMetadata.Exists"/> property will both be set to false.</para>
-        /// <para>For automatic handling of files <b>and</b> directories, use <see cref="GetFileSystemInfo"/>.</para></remarks>
+        /// <para>For automatic handling of files <b>and</b> directories, use <see cref="GetFileSystemInfo(string)"/>.</para></remarks>
         public virtual FileSystemMetadata GetFileInfo(string path)
         {
             var fileInfo = new FileInfo(path);
 
-            return GetFileSystemMetadata(fileInfo);
+            return GetFileSystemMetadata(fileInfo, false);
         }
 
         /// <summary>
@@ -232,15 +236,18 @@ namespace Emby.Server.Implementations.IO
         /// <returns>A <see cref="FileSystemMetadata"/> object.</returns>
         /// <remarks><para>If the specified path points to a file, the returned <see cref="FileSystemMetadata"/> object's
         /// <see cref="FileSystemMetadata.IsDirectory"/> property will be set to true and the <see cref="FileSystemMetadata.Exists"/> property will be set to false.</para>
-        /// <para>For automatic handling of files <b>and</b> directories, use <see cref="GetFileSystemInfo"/>.</para></remarks>
+        /// <para>For automatic handling of files <b>and</b> directories, use <see cref="GetFileSystemInfo(string)"/>.</para></remarks>
         public virtual FileSystemMetadata GetDirectoryInfo(string path)
         {
             var fileInfo = new DirectoryInfo(path);
 
-            return GetFileSystemMetadata(fileInfo);
+            return GetFileSystemMetadata(fileInfo, false);
         }
 
         private FileSystemMetadata GetFileSystemMetadata(FileSystemInfo info)
+            => GetFileSystemMetadata(info, false);
+
+        private FileSystemMetadata GetFileSystemMetadata(FileSystemInfo info, bool skipResolvingVideoSymlinks)
         {
             var result = new FileSystemMetadata
             {
@@ -251,9 +258,7 @@ namespace Emby.Server.Implementations.IO
             };
 
             if (info is FileInfo linkInfo
-                && linkInfo.LinkTarget is not null
-                && LocalMetadataOnlyImportPolicy.IsEnvironmentEnabled()
-                && LocalMetadataOnlyImportPolicy.IsVideoLikePath(linkInfo.FullName))
+                && IsLocalMetadataOnlyVideoSymlink(linkInfo, skipResolvingVideoSymlinks))
             {
                 result.Exists = true;
                 result.IsDirectory = false;
@@ -309,6 +314,11 @@ namespace Emby.Server.Implementations.IO
 
             return result;
         }
+
+        private static bool IsLocalMetadataOnlyVideoSymlink(FileInfo info, bool skipResolvingVideoSymlinks)
+            => info.LinkTarget is not null
+               && (skipResolvingVideoSymlinks || LocalMetadataOnlyImportPolicy.IsEnvironmentEnabled())
+               && LocalMetadataOnlyImportPolicy.IsVideoLikePath(info.FullName);
 
         /// <summary>
         /// Takes a filename and removes invalid characters.
@@ -632,6 +642,10 @@ namespace Emby.Server.Implementations.IO
 
         /// <inheritdoc />
         public virtual IEnumerable<FileSystemMetadata> GetFileSystemEntries(string path, bool recursive = false)
+            => GetFileSystemEntries(path, recursive, false);
+
+        /// <inheritdoc />
+        public virtual IEnumerable<FileSystemMetadata> GetFileSystemEntries(string path, bool recursive, bool skipResolvingVideoSymlinks)
         {
             // Note: any of unhandled exceptions thrown by this method may cause the caller to believe the whole path is not accessible.
             // But what causing the exception may be a single file under that path. This could lead to unexpected behavior.
@@ -639,12 +653,15 @@ namespace Emby.Server.Implementations.IO
             var directoryInfo = new DirectoryInfo(path);
             var enumerationOptions = GetEnumerationOptions(recursive);
 
-            return ToMetadata(directoryInfo.EnumerateFileSystemInfos("*", enumerationOptions));
+            return ToMetadata(directoryInfo.EnumerateFileSystemInfos("*", enumerationOptions), skipResolvingVideoSymlinks);
         }
 
         private IEnumerable<FileSystemMetadata> ToMetadata(IEnumerable<FileSystemInfo> infos)
+            => ToMetadata(infos, false);
+
+        private IEnumerable<FileSystemMetadata> ToMetadata(IEnumerable<FileSystemInfo> infos, bool skipResolvingVideoSymlinks)
         {
-            return infos.Select(GetFileSystemMetadata);
+            return infos.Select(info => GetFileSystemMetadata(info, skipResolvingVideoSymlinks));
         }
 
         /// <inheritdoc />

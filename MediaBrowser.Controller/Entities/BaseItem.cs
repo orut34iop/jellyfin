@@ -1307,6 +1307,7 @@ namespace MediaBrowser.Controller.Entities
         /// <returns>true if a provider reports we changed.</returns>
         public async Task<ItemUpdateType> RefreshMetadata(MetadataRefreshOptions options, CancellationToken cancellationToken)
         {
+            options = EnsureLocalMetadataOnlyDirectoryService(options);
             var requiresSave = false;
 
             if (SupportsOwnedItems)
@@ -1462,7 +1463,9 @@ namespace MediaBrowser.Controller.Entities
                 return false;
             }
 
-            var info = FileSystem.GetFileSystemInfo(Path);
+            var info = ShouldSkipResolvingVideoSymlink(Path)
+                ? FileSystem.GetFileSystemInfo(Path, true)
+                : FileSystem.GetFileSystemInfo(Path);
 
             return info.Exists && this.HasChanged(info.LastWriteTimeUtc);
         }
@@ -2524,7 +2527,10 @@ namespace MediaBrowser.Controller.Entities
             // Try to retrieve it from the db. If we don't find it, use the resolved version
             if (LibraryManager.GetItemById(id) is not Video video)
             {
-                video = LibraryManager.ResolvePath(FileSystem.GetFileSystemInfo(path)) as Video;
+                var fileInfo = ShouldSkipResolvingVideoSymlink(path)
+                    ? FileSystem.GetFileSystemInfo(path, true)
+                    : FileSystem.GetFileSystemInfo(path);
+                video = LibraryManager.ResolvePath(fileInfo, directoryService: newOptions.DirectoryService) as Video;
 
                 newOptions.ForceSave = true;
             }
@@ -2541,6 +2547,21 @@ namespace MediaBrowser.Controller.Entities
 
             await RefreshMetadataForOwnedItem(video, copyTitleMetadata, newOptions, cancellationToken).ConfigureAwait(false);
         }
+
+        private MetadataRefreshOptions EnsureLocalMetadataOnlyDirectoryService(MetadataRefreshOptions options)
+        {
+            if (LocalMetadataOnlyImportPolicy.IsEnabledForItem(this, LibraryManager)
+                && options.DirectoryService is not DirectoryService { SkipResolvingVideoSymlinks: true })
+            {
+                return new MetadataRefreshOptions(options, new DirectoryService(FileSystem, true));
+            }
+
+            return options;
+        }
+
+        private bool ShouldSkipResolvingVideoSymlink(string path)
+            => LocalMetadataOnlyImportPolicy.IsEnabledForItem(this, LibraryManager)
+               && LocalMetadataOnlyImportPolicy.IsVideoLikePath(path);
 
         public string GetEtag(User user)
         {

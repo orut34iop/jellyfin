@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using AutoFixture;
 using AutoFixture.AutoMoq;
@@ -156,6 +157,54 @@ public class ManagedFileSystemTests
         finally
         {
             File.Delete(testFileName);
+            Environment.SetEnvironmentVariable(LocalMetadataOnlyImportPolicy.EnvironmentVariableName, previous);
+        }
+    }
+
+    [SkippableFact]
+    public void GetFileSystemEntries_LocalMetadataOnlyImportDanglingVideoSymlink_ReturnsPlaceholderWithLocalMetadataFiles()
+    {
+        Skip.If(OperatingSystem.IsWindows());
+
+        var previous = Environment.GetEnvironmentVariable(LocalMetadataOnlyImportPolicy.EnvironmentVariableName);
+        Environment.SetEnvironmentVariable(LocalMetadataOnlyImportPolicy.EnvironmentVariableName, null);
+
+        string testFileDir = Path.Combine(Path.GetTempPath(), "jellyfin-test-data", Path.GetRandomFileName());
+        string videoPath = Path.Combine(testFileDir, "movie.iso");
+        string nfoPath = Path.Combine(testFileDir, "movie.nfo");
+        string posterPath = Path.Combine(testFileDir, "movie-poster.jpg");
+
+        try
+        {
+            Directory.CreateDirectory(testFileDir);
+            Assert.Equal(0, symlink("thispathdoesntexist", videoPath));
+            File.WriteAllText(nfoPath, "<movie><title>Local Movie</title></movie>");
+            FileHelper.CreateEmpty(posterPath);
+
+            var metadata = _sut.GetFileSystemEntries(testFileDir, false, true).ToArray();
+
+            var video = Assert.Single(metadata, entry => string.Equals(entry.FullName, videoPath, StringComparison.Ordinal));
+            Assert.True(video.Exists);
+            Assert.False(video.IsDirectory);
+            Assert.Equal(LocalMetadataOnlyImportPolicy.PlaceholderVideoLength, video.Length);
+            Assert.Equal(LocalMetadataOnlyImportPolicy.StableFileTimestampUtc, video.CreationTimeUtc);
+            Assert.Equal(LocalMetadataOnlyImportPolicy.StableFileTimestampUtc, video.LastWriteTimeUtc);
+
+            var directVideo = _sut.GetFileSystemInfo(videoPath, true);
+            Assert.True(directVideo.Exists);
+            Assert.False(directVideo.IsDirectory);
+            Assert.Equal(LocalMetadataOnlyImportPolicy.PlaceholderVideoLength, directVideo.Length);
+
+            Assert.Contains(metadata, entry => string.Equals(entry.FullName, nfoPath, StringComparison.Ordinal) && entry.Exists);
+            Assert.Contains(metadata, entry => string.Equals(entry.FullName, posterPath, StringComparison.Ordinal) && entry.Exists);
+        }
+        finally
+        {
+            if (Directory.Exists(testFileDir))
+            {
+                Directory.Delete(testFileDir, true);
+            }
+
             Environment.SetEnvironmentVariable(LocalMetadataOnlyImportPolicy.EnvironmentVariableName, previous);
         }
     }

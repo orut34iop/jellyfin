@@ -65,6 +65,19 @@ namespace Jellyfin.Controller.Tests
         }
 
         [Fact]
+        public void GetFileSystemEntries_WhenSkippingVideoSymlinkResolution_UsesFileSystemOption()
+        {
+            var fileSystemMock = new Mock<IFileSystem>(MockBehavior.Strict);
+            fileSystemMock.Setup(f => f.GetFileSystemEntries(It.Is<string>(x => x == UpperCasePath), false, true)).Returns(_upperCaseFileSystemMetadata);
+            var directoryService = new DirectoryService(fileSystemMock.Object, true);
+
+            var result = directoryService.GetFileSystemEntries(UpperCasePath);
+
+            Assert.Equal(_upperCaseFileSystemMetadata, result);
+            fileSystemMock.Verify(f => f.GetFileSystemEntries(It.IsAny<string>(), It.IsAny<bool>()), Times.Never);
+        }
+
+        [Fact]
         public void GetFiles_GivenPathsWithDifferentCasing_ReturnsCorrectFiles()
         {
             var fileSystemMock = new Mock<IFileSystem>();
@@ -123,6 +136,26 @@ namespace Jellyfin.Controller.Tests
             Assert.Equal(lowerCaseFileSystemMetadata, lowerCaseFileResult);
             Assert.Null(upperCaseDirResult);
             Assert.Null(upperCaseFileResult);
+        }
+
+        [Fact]
+        public void GetFile_WhenSkippingVideoSymlinkResolution_UsesFileSystemOption()
+        {
+            const string path = "/movies/movie.iso";
+            var fileSystemMetadata = new FileSystemMetadata
+            {
+                FullName = path,
+                Exists = true
+            };
+
+            var fileSystemMock = new Mock<IFileSystem>(MockBehavior.Strict);
+            fileSystemMock.Setup(f => f.GetFileSystemInfo(It.Is<string>(x => x == path), true)).Returns(fileSystemMetadata);
+            var directoryService = new DirectoryService(fileSystemMock.Object, true);
+
+            var result = directoryService.GetFile(path);
+
+            Assert.Equal(fileSystemMetadata, result);
+            fileSystemMock.Verify(f => f.GetFileSystemInfo(It.IsAny<string>()), Times.Never);
         }
 
         [Fact]

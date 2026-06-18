@@ -335,7 +335,7 @@ namespace Emby.Server.Implementations.Library.Resolvers.Movies
                 episode.SeriesId = series.Id;
                 episode.SeriesName = series.Name;
             }
-            else if (season is not null && season.SeriesId != Guid.Empty)
+            else if (season is not null && !season.SeriesId.Equals(Guid.Empty))
             {
                 episode.SeriesId = season.SeriesId;
                 episode.SeriesName = season.SeriesName;

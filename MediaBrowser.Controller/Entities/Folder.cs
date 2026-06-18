@@ -372,6 +372,22 @@ namespace MediaBrowser.Controller.Entities
 
         private async Task ValidateChildrenInternal2(IProgress<double> progress, bool recursive, bool refreshChildMetadata, bool allowRemoveRoot, MetadataRefreshOptions refreshOptions, IDirectoryService directoryService, CancellationToken cancellationToken)
         {
+            var libraryOptions = LibraryManager.GetLibraryOptions(this);
+            if (LocalMetadataOnlyImportPolicy.IsEnabled(libraryOptions)
+                && directoryService is not DirectoryService { SkipResolvingVideoSymlinks: true })
+            {
+                directoryService = new DirectoryService(FileSystem, true);
+                if (refreshOptions is not null)
+                {
+                    refreshOptions = new MetadataRefreshOptions(refreshOptions, directoryService);
+                }
+
+                if (IsTopParent)
+                {
+                    Logger.LogInformation("LocalMetadataOnlyImport enabled for library {LibraryName}; scanning local metadata and images without resolving video symlinks", Name ?? Path);
+                }
+            }
+
             if (!IsLibraryFolderAccessible(directoryService, this, allowRemoveRoot))
             {
                 return;

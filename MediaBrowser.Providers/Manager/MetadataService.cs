@@ -340,7 +340,11 @@ namespace MediaBrowser.Providers.Manager
             var itemPath = item.Path;
             if (!string.IsNullOrEmpty(itemPath))
             {
-                var info = FileSystem.GetFileSystemInfo(itemPath);
+                var libraryOptions = LibraryManager.GetLibraryOptions(item);
+                var info = LocalMetadataOnlyImportPolicy.IsEnabled(libraryOptions)
+                    && LocalMetadataOnlyImportPolicy.IsVideoLikePath(itemPath)
+                    ? FileSystem.GetFileSystemInfo(itemPath, true)
+                    : FileSystem.GetFileSystemInfo(itemPath);
                 if (info.Exists && item.HasChanged(info.LastWriteTimeUtc))
                 {
                     Logger.LogDebug("File modification time changed from {Then} to {Now}: {Path}", item.DateModified, info.LastWriteTimeUtc, itemPath);
