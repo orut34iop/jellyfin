@@ -161,6 +161,37 @@ public class ManagedFileSystemTests
         }
     }
 
+    [Fact]
+    public void GetFileInfo_LocalMetadataOnlyImportVideoFile_ReturnsPlaceholderWithoutChangingDefault()
+    {
+        string testFileDir = Path.Combine(Path.GetTempPath(), "jellyfin-test-data", Path.GetRandomFileName());
+        string videoPath = Path.Combine(testFileDir, "movie.mkv");
+
+        try
+        {
+            Directory.CreateDirectory(testFileDir);
+            File.WriteAllBytes(videoPath, [0, 1, 2, 3]);
+
+            var defaultMetadata = _sut.GetFileSystemInfo(videoPath);
+            Assert.True(defaultMetadata.Exists);
+            Assert.Equal(4, defaultMetadata.Length);
+
+            var localMetadataOnlyMetadata = _sut.GetFileSystemInfo(videoPath, true);
+            Assert.True(localMetadataOnlyMetadata.Exists);
+            Assert.False(localMetadataOnlyMetadata.IsDirectory);
+            Assert.Equal(LocalMetadataOnlyImportPolicy.PlaceholderVideoLength, localMetadataOnlyMetadata.Length);
+            Assert.Equal(LocalMetadataOnlyImportPolicy.StableFileTimestampUtc, localMetadataOnlyMetadata.CreationTimeUtc);
+            Assert.Equal(LocalMetadataOnlyImportPolicy.StableFileTimestampUtc, localMetadataOnlyMetadata.LastWriteTimeUtc);
+        }
+        finally
+        {
+            if (Directory.Exists(testFileDir))
+            {
+                Directory.Delete(testFileDir, true);
+            }
+        }
+    }
+
     [SkippableFact]
     public void GetFileSystemEntries_LocalMetadataOnlyImportDanglingVideoSymlink_ReturnsPlaceholderWithLocalMetadataFiles()
     {

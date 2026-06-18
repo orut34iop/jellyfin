@@ -2058,21 +2058,25 @@ namespace Emby.Server.Implementations.Library
         }
 
         /// <inheritdoc />
-        public async Task UpdateImagesAsync(BaseItem item, bool forceUpdate = false)
+        public Task UpdateImagesAsync(BaseItem item, bool forceUpdate = false)
+            => UpdateImagesAsync(item, forceUpdate, false);
+
+        private async Task UpdateImagesAsync(BaseItem item, bool forceUpdate, bool skipRemoteImages)
         {
             ArgumentNullException.ThrowIfNull(item);
 
+            var localMetadataOnlyImport = skipRemoteImages || LocalMetadataOnlyImportPolicy.IsEnabledForItem(item, this);
             var outdated = forceUpdate
-                ? item.ImageInfos.Where(i => i.Path is not null).ToArray()
-                : item.ImageInfos.Where(ImageNeedsRefresh).ToArray();
+                ? item.ImageInfos.Where(i => i.Path is not null && (!localMetadataOnlyImport || !i.IsLocalFile)).ToArray()
+                : localMetadataOnlyImport
+                    ? item.ImageInfos.Where(i => i.Path is not null && !i.IsLocalFile).ToArray()
+                    : item.ImageInfos.Where(ImageNeedsRefresh).ToArray();
             // Skip image processing if current or live tv source
             if (outdated.Length == 0 || item.SourceType != SourceType.Library)
             {
                 RegisterItem(item);
                 return;
             }
-
-            var localMetadataOnlyImport = LocalMetadataOnlyImportPolicy.IsEnabledForItem(item, this);
 
             foreach (var img in outdated)
             {
@@ -2216,14 +2220,18 @@ namespace Emby.Server.Implementations.Library
             await _itemRepository.ReattachUserDataAsync(item, cancellationToken).ConfigureAwait(false);
         }
 
-        public async Task RunMetadataSavers(BaseItem item, ItemUpdateType updateReason)
+        public Task RunMetadataSavers(BaseItem item, ItemUpdateType updateReason)
+            => RunMetadataSavers(item, updateReason, false);
+
+        private async Task RunMetadataSavers(BaseItem item, ItemUpdateType updateReason, bool skipRemoteImages)
         {
-            if (item.IsFileProtocol)
+            var localMetadataOnlyImport = skipRemoteImages || LocalMetadataOnlyImportPolicy.IsEnabledForItem(item, this);
+            if (item.IsFileProtocol && !localMetadataOnlyImport)
             {
                 await ProviderManager.SaveMetadataAsync(item, updateReason).ConfigureAwait(false);
             }
 
-            await UpdateImagesAsync(item, updateReason >= ItemUpdateType.ImageUpdate).ConfigureAwait(false);
+            await UpdateImagesAsync(item, updateReason >= ItemUpdateType.ImageUpdate, localMetadataOnlyImport).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -2988,8 +2996,15 @@ namespace Emby.Server.Implementations.Library
             if (people is not null)
             {
                 people = people.Where(e => e is not null).ToArray();
+                var localMetadataOnlyImport = LocalMetadataOnlyImportPolicy.IsEnabledForItem(item, this);
                 _peopleRepository.UpdatePeople(item.Id, people);
-                await SavePeopleMetadataAsync(people, cancellationToken).ConfigureAwait(false);
+                if (localMetadataOnlyImport)
+                {
+                    _logger.LogDebug("LocalMetadataOnlyImport enabled; skipping person metadata entity saves for {Item}", item.Path ?? item.Name);
+                    return;
+                }
+
+                await SavePeopleMetadataAsync(people, cancellationToken, localMetadataOnlyImport).ConfigureAwait(false);
             }
         }
 
@@ -3108,7 +3123,7 @@ namespace Emby.Server.Implementations.Library
             }
         }
 
-        private async Task SavePeopleMetadataAsync(IEnumerable<PersonInfo> people, CancellationToken cancellationToken)
+        private async Task SavePeopleMetadataAsync(IEnumerable<PersonInfo> people, CancellationToken cancellationToken, bool localMetadataOnlyImport)
         {
             foreach (var person in people)
             {
@@ -3154,7 +3169,9 @@ namespace Emby.Server.Implementations.Library
                     }
                 }
 
-                if (!string.IsNullOrWhiteSpace(person.ImageUrl) && !personEntity.HasImage(ImageType.Primary))
+                var hasUsableImageUrl = LocalMetadataOnlyImportPolicy.CanImportImagePath(person.ImageUrl, localMetadataOnlyImport);
+
+                if (hasUsableImageUrl && !personEntity.HasImage(ImageType.Primary))
                 {
                     personEntity.SetImage(
                         new ItemImageInfo
@@ -3170,12 +3187,16 @@ namespace Emby.Server.Implementations.Library
 
                 if (saveEntity)
                 {
-                    if (createEntity)
+                    if (createEntity && !localMetadataOnlyImport)
                     {
                         CreateItems([personEntity], null, CancellationToken.None);
                     }
 
-                    await RunMetadataSavers(personEntity, itemUpdateType).ConfigureAwait(false);
+                    if (!localMetadataOnlyImport)
+                    {
+                        await RunMetadataSavers(personEntity, itemUpdateType, false).ConfigureAwait(false);
+                    }
+
                     personEntity.DateLastSaved = DateTime.UtcNow;
 
                     CreateItems([personEntity], null, CancellationToken.None);

@@ -63,4 +63,16 @@ public class LocalMetadataOnlyImportPolicyTests
     [InlineData("/media/movie.nfo", false)]
     public void IsVideoLikePath_MatchesExpectedExtensions(string path, bool expected)
         => Assert.Equal(expected, LocalMetadataOnlyImportPolicy.IsVideoLikePath(path));
+
+    [Theory]
+    [InlineData("https://image.tmdb.org/t/p/original/person.jpg", false, true)]
+    [InlineData("http://image.tmdb.org/t/p/original/person.jpg", true, false)]
+    [InlineData("https://image.tmdb.org/t/p/original/person.jpg", true, false)]
+    [InlineData("/metadata/People/A/Actor/poster.jpg", true, true)]
+    [InlineData("", true, false)]
+    public void CanImportImagePath_LocalMetadataOnlyImportSkipsRemoteUrls(
+        string path,
+        bool localMetadataOnlyImport,
+        bool expected)
+        => Assert.Equal(expected, LocalMetadataOnlyImportPolicy.CanImportImagePath(path, localMetadataOnlyImport));
 }

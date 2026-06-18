@@ -80,30 +80,34 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
         }
 
         // multiple metadata providers can provide the _same_ person
-        people = people.DistinctBy(e => e.Name + "-" + e.Type).ToArray();
-        var personKeys = people.Select(e => e.Name + "-" + e.Type).ToArray();
+        people = people.DistinctBy(GetPersonKey).ToArray();
+        var personKeys = people.Select(GetPersonKey).ToHashSet(StringComparer.Ordinal);
+        var personNames = people.Select(e => e.Name).Distinct(StringComparer.Ordinal).ToArray();
 
         using var context = _dbProvider.CreateDbContext();
         using var transaction = context.Database.BeginTransaction();
-        var existingPersons = context.Peoples.Select(e => new
-            {
-                item = e,
-                SelectionKey = e.Name + "-" + e.PersonType
-            })
-            .Where(p => personKeys.Contains(p.SelectionKey))
-            .Select(f => f.item)
+        var existingPersons = context.Peoples
+            .Where(e => personNames.Contains(e.Name))
+            .AsEnumerable()
+            .Where(e => personKeys.Contains(GetPersonKey(e)))
             .ToArray();
+        var existingPersonKeys = existingPersons.Select(GetPersonKey).ToHashSet(StringComparer.Ordinal);
 
         var toAdd = people
             .Where(e => e.Type is not PersonKind.Artist && e.Type is not PersonKind.AlbumArtist)
-            .Where(e => !existingPersons.Any(f => f.Name == e.Name && f.PersonType == e.Type.ToString()))
-            .Select(Map);
+            .Where(e => !existingPersonKeys.Contains(GetPersonKey(e)))
+            .Select(Map)
+            .ToArray();
         context.Peoples.AddRange(toAdd);
         context.SaveChanges();
 
-        var personsEntities = toAdd.Concat(existingPersons).ToArray();
+        var personsEntities = toAdd.Concat(existingPersons).ToDictionary(GetPersonKey, StringComparer.Ordinal);
 
         var existingMaps = context.PeopleBaseItemMap.Include(e => e.People).Where(e => e.ItemId == itemId).ToList();
+        var existingMapsByKey = existingMaps
+            .GroupBy(GetMapKey, StringComparer.Ordinal)
+            .ToDictionary(e => e.Key, e => e.First(), StringComparer.Ordinal);
+        var mapsToRemove = existingMaps.ToHashSet();
 
         var listOrder = 0;
 
@@ -114,8 +118,8 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
                 continue;
             }
 
-            var entityPerson = personsEntities.First(e => e.Name == person.Name && e.PersonType == person.Type.ToString());
-            var existingMap = existingMaps.FirstOrDefault(e => e.People.Name == person.Name && e.People.PersonType == person.Type.ToString() && e.Role == person.Role);
+            var entityPerson = personsEntities[GetPersonKey(person)];
+            var existingMap = existingMapsByKey.GetValueOrDefault(GetMapKey(person));
             if (existingMap is null)
             {
                 context.PeopleBaseItemMap.Add(new PeopleBaseItemMap()
@@ -135,17 +139,29 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
                 existingMap.ListOrder = listOrder;
                 existingMap.SortOrder = person.SortOrder;
                 // person mapping already exists so remove from list
-                existingMaps.Remove(existingMap);
+                mapsToRemove.Remove(existingMap);
             }
 
             listOrder++;
         }
 
-        context.PeopleBaseItemMap.RemoveRange(existingMaps);
+        context.PeopleBaseItemMap.RemoveRange(mapsToRemove);
 
         context.SaveChanges();
         transaction.Commit();
     }
+
+    private static string GetPersonKey(PersonInfo person)
+        => person.Name + "-" + person.Type;
+
+    private static string GetPersonKey(People person)
+        => person.Name + "-" + person.PersonType;
+
+    private static string GetMapKey(PersonInfo person)
+        => person.Name + "-" + person.Type + "-" + person.Role;
+
+    private static string GetMapKey(PeopleBaseItemMap map)
+        => map.People.Name + "-" + map.People.PersonType + "-" + map.Role;
 
     private PersonInfo Map(People people)
     {

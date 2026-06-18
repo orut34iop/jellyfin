@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Security;
 using Jellyfin.Extensions;
 using MediaBrowser.Common.Configuration;
@@ -194,7 +195,7 @@ namespace Emby.Server.Implementations.IO
             {
                 var fileInfo = new FileInfo(path);
 
-                if (fileInfo.Exists || IsLocalMetadataOnlyVideoSymlink(fileInfo, skipResolvingVideoSymlinks))
+                if (ShouldUseLocalMetadataOnlyVideoPlaceholder(fileInfo, skipResolvingVideoSymlinks) || fileInfo.Exists)
                 {
                     return GetFileSystemMetadata(fileInfo, skipResolvingVideoSymlinks);
                 }
@@ -249,6 +250,22 @@ namespace Emby.Server.Implementations.IO
 
         private FileSystemMetadata GetFileSystemMetadata(FileSystemInfo info, bool skipResolvingVideoSymlinks)
         {
+            if (info is FileInfo placeholderFileInfo
+                && ShouldUseLocalMetadataOnlyVideoPlaceholder(placeholderFileInfo, skipResolvingVideoSymlinks))
+            {
+                return new FileSystemMetadata
+                {
+                    Exists = true,
+                    FullName = info.FullName,
+                    Extension = info.Extension,
+                    Name = info.Name,
+                    IsDirectory = false,
+                    Length = LocalMetadataOnlyImportPolicy.PlaceholderVideoLength,
+                    CreationTimeUtc = LocalMetadataOnlyImportPolicy.StableFileTimestampUtc,
+                    LastWriteTimeUtc = LocalMetadataOnlyImportPolicy.StableFileTimestampUtc
+                };
+            }
+
             var result = new FileSystemMetadata
             {
                 Exists = info.Exists,
@@ -256,17 +273,6 @@ namespace Emby.Server.Implementations.IO
                 Extension = info.Extension,
                 Name = info.Name
             };
-
-            if (info is FileInfo linkInfo
-                && IsLocalMetadataOnlyVideoSymlink(linkInfo, skipResolvingVideoSymlinks))
-            {
-                result.Exists = true;
-                result.IsDirectory = false;
-                result.Length = LocalMetadataOnlyImportPolicy.PlaceholderVideoLength;
-                result.CreationTimeUtc = LocalMetadataOnlyImportPolicy.StableFileTimestampUtc;
-                result.LastWriteTimeUtc = LocalMetadataOnlyImportPolicy.StableFileTimestampUtc;
-                return result;
-            }
 
             if (result.Exists)
             {
@@ -315,9 +321,8 @@ namespace Emby.Server.Implementations.IO
             return result;
         }
 
-        private static bool IsLocalMetadataOnlyVideoSymlink(FileInfo info, bool skipResolvingVideoSymlinks)
-            => info.LinkTarget is not null
-               && (skipResolvingVideoSymlinks || LocalMetadataOnlyImportPolicy.IsEnvironmentEnabled())
+        private static bool ShouldUseLocalMetadataOnlyVideoPlaceholder(FileInfo info, bool skipResolvingVideoSymlinks)
+            => (skipResolvingVideoSymlinks || LocalMetadataOnlyImportPolicy.IsEnvironmentEnabled())
                && LocalMetadataOnlyImportPolicy.IsVideoLikePath(info.FullName);
 
         /// <summary>
@@ -650,9 +655,15 @@ namespace Emby.Server.Implementations.IO
             // Note: any of unhandled exceptions thrown by this method may cause the caller to believe the whole path is not accessible.
             // But what causing the exception may be a single file under that path. This could lead to unexpected behavior.
             // For example, the scanner will remove everything in that path due to unhandled errors.
+            if (skipResolvingVideoSymlinks)
+            {
+                return GetFileSystemEntryPathsWithoutResolvingMetadata(path, recursive)
+                    .Select(i => GetFileSystemInfo(i, true))
+                    .Where(i => i.Exists);
+            }
+
             var directoryInfo = new DirectoryInfo(path);
             var enumerationOptions = GetEnumerationOptions(recursive);
-
             return ToMetadata(directoryInfo.EnumerateFileSystemInfos("*", enumerationOptions), skipResolvingVideoSymlinks);
         }
 
@@ -721,6 +732,55 @@ namespace Emby.Server.Implementations.IO
             }
         }
 
+        private IEnumerable<string> GetFileSystemEntryPathsWithoutResolvingMetadata(string path, bool recursive)
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                return GetFileSystemEntryPaths(path, recursive);
+            }
+
+            return EnumerateFileSystemEntryPathsWithoutResolvingMetadata(path, recursive);
+        }
+
+        private IEnumerable<string> EnumerateFileSystemEntryPathsWithoutResolvingMetadata(string path, bool recursive)
+        {
+            var directory = NativeMethods.OpenDirectory(path);
+            if (directory == IntPtr.Zero)
+            {
+                yield break;
+            }
+
+            try
+            {
+                IntPtr entry;
+                while ((entry = NativeMethods.ReadDirectory(directory)) != IntPtr.Zero)
+                {
+                    var name = NativeMethods.GetDirectoryEntryName(entry);
+                    if (string.IsNullOrEmpty(name) || name is "." or "..")
+                    {
+                        continue;
+                    }
+
+                    var entryPath = Path.Combine(path, name);
+                    yield return entryPath;
+
+                    if (recursive
+                        && !LocalMetadataOnlyImportPolicy.IsVideoLikePath(entryPath)
+                        && Directory.Exists(entryPath))
+                    {
+                        foreach (var child in EnumerateFileSystemEntryPathsWithoutResolvingMetadata(entryPath, true))
+                        {
+                            yield return child;
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                NativeMethods.CloseDirectory(directory);
+            }
+        }
+
         /// <inheritdoc />
         public virtual bool DirectoryExists(string path)
         {
@@ -742,6 +802,27 @@ namespace Emby.Server.Implementations.IO
                 // Don't skip any files.
                 AttributesToSkip = 0
             };
+        }
+
+        private static class NativeMethods
+        {
+            private const string LibC = "libc";
+
+            private static readonly int _directoryEntryNameOffset = OperatingSystem.IsMacOS() || OperatingSystem.IsFreeBSD()
+                ? 21
+                : 19;
+
+            [DllImport(LibC, EntryPoint = "opendir", SetLastError = true)]
+            public static extern IntPtr OpenDirectory([MarshalAs(UnmanagedType.LPUTF8Str)] string path);
+
+            [DllImport(LibC, EntryPoint = "readdir", SetLastError = true)]
+            public static extern IntPtr ReadDirectory(IntPtr directory);
+
+            [DllImport(LibC, EntryPoint = "closedir", SetLastError = true)]
+            public static extern int CloseDirectory(IntPtr directory);
+
+            public static string? GetDirectoryEntryName(IntPtr entry)
+                => Marshal.PtrToStringUTF8(IntPtr.Add(entry, _directoryEntryNameOffset));
         }
     }
 }

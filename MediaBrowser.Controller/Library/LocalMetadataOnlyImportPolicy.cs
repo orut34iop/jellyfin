@@ -77,4 +77,8 @@ public static class LocalMetadataOnlyImportPolicy
         => path is not null
            && (path.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
                || path.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
+
+    public static bool CanImportImagePath(string? path, bool localMetadataOnlyImport)
+        => !string.IsNullOrWhiteSpace(path)
+           && (!localMetadataOnlyImport || !IsRemoteHttpPath(path));
 }
