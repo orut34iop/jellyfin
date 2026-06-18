@@ -162,7 +162,93 @@ Object name: 'IServiceProvider'.
 - `MediaStreamInfos=0`，说明没有生成 ffprobe 媒体流信息。
 - `MediaSegments=0`，说明没有执行媒体分段提取。
 
-## 7. 中间快照对比
+## 7. 本地用户数据占用统计
+
+统计范围：
+
+```text
+/Users/wiz/Library/Application Support/jellyfin
+```
+
+该目录是本次 macOS Jellyfin App 的主要本地用户数据目录，包含配置、数据库、缓存、日志、插件和运行数据。检查时没有发现额外的 macOS Caches/Logs 目录：
+
+```text
+/Users/wiz/Library/Caches/jellyfin: missing
+/Users/wiz/Library/Caches/Jellyfin: missing
+/Users/wiz/Library/Logs/jellyfin: missing
+/Users/wiz/Library/Logs/Jellyfin: missing
+```
+
+### 总占用
+
+```text
+Total: 4,160,448 KB
+Total: 4,062.94 MiB
+Total: 3.97 GiB
+```
+
+### 一级目录占用
+
+| 路径 | 大小 | MiB | 占比 | 文件数 |
+| --- | ---: | ---: | ---: | ---: |
+| `data` | 4,136,516 KB | 4,039.57 MiB | 99.42% | 22 |
+| `cache` | 14,412 KB | 14.07 MiB | 0.35% | 165 |
+| `log` | 9,472 KB | 9.25 MiB | 0.23% | 4 |
+| `config` | 24 KB | 0.02 MiB | 0.00058% | 6 |
+| `root` | 16 KB | 0.02 MiB | 0.00038% | 7 |
+| `plugins` | 8 KB | 0.01 MiB | 0.00019% | 3 |
+| `.jellyfin-data` | 0 KB | 0 MiB | 0% | 1 |
+| `metadata` | 0 KB | 0 MiB | 0% | 0 |
+
+结论：本地用户数据几乎全部来自 `data` 目录，占总量约 `99.42%`。
+
+### data 目录文件占用
+
+| 文件 | 大小 | MiB/GiB | 占总用户数据比例 |
+| --- | ---: | ---: | ---: |
+| `jellyfin.db` | 4,132,340 KB | 4,035.49 MiB / 3.94 GiB | 99.32% |
+| `splashscreen.png` | 3,572 KB | 3.49 MiB | 0.09% |
+| `jellyfin.db-wal` | 504 KB | 0.49 MiB | 0.0121% |
+| `jellyfin.db-shm` | 32 KB | 0.03 MiB | 0.0008% |
+| `device.txt` | 4 KB | 0.004 MiB | <0.001% |
+| `.jellyfin-data` | 0 KB | 0 MiB | 0% |
+
+结论：导入完成后，本地用户数据主要由 SQLite 主库 `jellyfin.db` 占用。该文件约 `3.94 GiB`，约占整个 Jellyfin 本地用户数据目录的 `99.32%`。
+
+### cache 目录占用
+
+| 路径 | 大小 | 文件数 |
+| --- | ---: | ---: |
+| `cache/images` | 14,412 KB | 163 |
+| `cache/transcodes` | 0 KB | 1 |
+| `cache/.jellyfin-cache` | 0 KB | 1 |
+
+结论：本次导入后的 cache 目录很小，主要是 `cache/images`，约 `14.07 MiB`。
+
+### log 目录占用
+
+| 文件 | 大小 |
+| --- | ---: |
+| `log_20260618.log` | 9,220 KB |
+| `log_20260617.log` | 232 KB |
+| `FFmpeg.Transcode-2026-06-18_09-59-37_c658be73b67e35a8a35f1864e60b982a_4f20a27d.log` | 20 KB |
+| `.jellyfin-log` | 0 KB |
+
+说明：`FFmpeg.Transcode-*` 日志出现在导入完成后的日志目录里。它不是本次媒体库扫描期间的 ffprobe 媒体探测结果；最终扫描验收里 `MediaStreamInfos=0`，且最近扫描日志禁用关键词命中为 `0`。
+
+### 占用结构结论
+
+导入完成后的本地用户数据占用结构非常集中：
+
+- 主数据库 `jellyfin.db`：约 `3.94 GiB`
+- 其他数据库辅助文件：不足 `1 MiB`
+- 图片缓存：约 `14.07 MiB`
+- 日志：约 `9.25 MiB`
+- 配置、插件、root、metadata：可以忽略不计
+
+这说明本次本地-only导入没有把本地图片大规模复制进 Jellyfin metadata/cache 目录；主要空间成本是 Jellyfin 数据库中的条目、人员、图片关系、元数据索引等结构化数据。
+
+## 8. 中间快照对比
 
 ### 77% 快照
 
@@ -246,7 +332,7 @@ MediaSegments: 0
 
 这说明在后半段，Jellyfin 仍然在继续写入元数据、图片关系和索引相关条目，并不是单纯等待。
 
-## 8. 本地-only验收指标
+## 9. 本地-only验收指标
 
 最终进程与资源检查：
 
@@ -265,7 +351,7 @@ External TCP connections: 0
 
 注意：监测过程中曾出现一次 `external_tcp=879` 的误报。原因是当时 `lsof` 没有使用 `-a -p <pid> -iTCP` 组合过滤，导致混入了全系统 TCP 连接。修正命令后 Jellyfin 外部 TCP 连接为 `0`。
 
-## 9. 日志验收
+## 10. 日志验收
 
 最终检查最近日志：
 
@@ -304,7 +390,7 @@ Forbidden log hits: 0
 - 远程图片下载错误
 - TMDb/OMDb/TVDb 相关远程请求痕迹
 
-## 10. Blurhash 说明
+## 11. Blurhash 说明
 
 日志中仍存在：
 
@@ -344,7 +430,7 @@ BlurHashSharp.SkiaSharp.BlurHashEncoder.Encode
 - 在 `LocalMetadataOnlyImport` 开启时跳过 blurhash 计算。
 - 或将 blurhash 失败日志降级/去重，减少大量图片导入时的日志噪音。
 
-## 11. 电影与电视剧导入结果
+## 12. 电影与电视剧导入结果
 
 ### 电影
 
@@ -383,7 +469,7 @@ Episodes with overview: 138,441
 
 这也验证了 `Fix TV episode parent ids during batch resolve` 这部分修复方向是正确的。
 
-## 12. 与目标验收项逐项对照
+## 13. 与目标验收项逐项对照
 
 | 验收项 | 结果 | 证据 |
 | --- | --- | --- |
@@ -400,7 +486,7 @@ Episodes with overview: 138,441
 | 默认媒体流可为空 | 通过 | `MediaStreamInfos=0` |
 | 媒体段不生成 | 通过 | `MediaSegments=0` |
 
-## 13. 注意事项
+## 14. 注意事项
 
 1. 本次监测基于运行时 API、SQLite 数据库、进程句柄、TCP 连接和日志关键词综合判断。
 2. `video_fds=0` 表示采样时 Jellyfin 没有打开视频文件句柄；它不能数学上证明扫描全程每一毫秒都没有瞬时打开文件，但结合代码改动、日志、子进程和数据库结果，已经能较强地支持本地-only验收。
@@ -408,14 +494,14 @@ Episodes with overview: 138,441
 4. `MediaStreamInfos=0` 是本次最重要的结果之一，说明扫描没有通过 ffprobe 写入媒体流信息。
 5. `MediaSegments=0` 说明媒体段提取也被有效绕过。
 
-## 14. 后续建议
+## 15. 后续建议
 
 建议后续做两个小优化：
 
 1. 在 `LocalMetadataOnlyImport` 下跳过 blurhash 计算，减少图片导入阶段 CPU 和日志噪音。
 2. 在 Web UI 或库配置中暴露 `LibraryOptions.LocalMetadataOnlyImport`，让这个模式可以按媒体库单独开启，而不是只能依赖全局环境变量。
 
-## 15. 最终结论
+## 16. 最终结论
 
 本次 `LocalMetadataOnlyImport` 大规模媒体库导入验证成功。
 
