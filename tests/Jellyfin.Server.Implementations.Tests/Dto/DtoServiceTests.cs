@@ -1,0 +1,92 @@
+using System;
+using System.Collections.Generic;
+using System.Reflection;
+using Emby.Server.Implementations.Dto;
+using Jellyfin.Data.Enums;
+using MediaBrowser.Common;
+using MediaBrowser.Controller.Chapters;
+using MediaBrowser.Controller.Drawing;
+using MediaBrowser.Controller.Dto;
+using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Entities.Movies;
+using MediaBrowser.Controller.Library;
+using MediaBrowser.Controller.LiveTv;
+using MediaBrowser.Controller.Providers;
+using MediaBrowser.Controller.Trickplay;
+using MediaBrowser.Model.Configuration;
+using MediaBrowser.Model.Dto;
+using Microsoft.Extensions.Logging;
+using Moq;
+using Xunit;
+
+namespace Jellyfin.Server.Implementations.Tests.Dto;
+
+public class DtoServiceTests
+{
+    [Fact]
+    public void AttachPeople_LocalMetadataOnlyImportIncludesPeopleWithoutPersonEntity()
+    {
+        var movie = new Movie { Id = Guid.NewGuid(), Name = "Local Movie" };
+        var person = new PersonInfo
+        {
+            Name = "Local Actor",
+            Role = "Lead",
+            Type = PersonKind.Actor
+        };
+
+        var dto = AttachPeople(movie, [person], localMetadataOnlyImport: true);
+
+        var attachedPerson = Assert.Single(dto.People);
+        Assert.Equal("Local Actor", attachedPerson.Name);
+        Assert.Equal("Lead", attachedPerson.Role);
+        Assert.Equal(PersonKind.Actor, attachedPerson.Type);
+        Assert.Equal(Guid.Empty, attachedPerson.Id);
+    }
+
+    [Fact]
+    public void AttachPeople_DefaultModeKeepsExistingPersonEntityFiltering()
+    {
+        var movie = new Movie { Id = Guid.NewGuid(), Name = "Default Movie" };
+        var person = new PersonInfo
+        {
+            Name = "Missing Person Entity",
+            Role = "Lead",
+            Type = PersonKind.Actor
+        };
+
+        var dto = AttachPeople(movie, [person], localMetadataOnlyImport: false);
+
+        Assert.Empty(dto.People);
+    }
+
+    private static BaseItemDto AttachPeople(Movie movie, IReadOnlyList<PersonInfo> people, bool localMetadataOnlyImport)
+    {
+        var libraryManager = new Mock<ILibraryManager>();
+        libraryManager.Setup(x => x.GetPeople(movie)).Returns(people);
+        libraryManager.Setup(x => x.GetPerson(It.IsAny<string>())).Returns((Person?)null);
+        libraryManager.Setup(x => x.GetLibraryOptions(movie)).Returns(new LibraryOptions
+        {
+            LocalMetadataOnlyImport = localMetadataOnlyImport
+        });
+
+        var dtoService = new DtoService(
+            Mock.Of<ILogger<DtoService>>(),
+            libraryManager.Object,
+            Mock.Of<IUserDataManager>(),
+            Mock.Of<IImageProcessor>(),
+            Mock.Of<IProviderManager>(),
+            Mock.Of<IRecordingsManager>(),
+            Mock.Of<IApplicationHost>(),
+            Mock.Of<IMediaSourceManager>(),
+            new Lazy<ILiveTvManager>(() => Mock.Of<ILiveTvManager>()),
+            Mock.Of<ITrickplayManager>(),
+            Mock.Of<IChapterManager>());
+
+        var dto = new BaseItemDto();
+        typeof(DtoService)
+            .GetMethod("AttachPeople", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(dtoService, [dto, movie, null]);
+
+        return dto;
+    }
+}

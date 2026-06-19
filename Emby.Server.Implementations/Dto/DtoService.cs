@@ -604,6 +604,8 @@ namespace Emby.Server.Implementations.Dto
         /// <param name="user">The requesting user.</param>
         private void AttachPeople(BaseItemDto dto, BaseItem item, User? user = null)
         {
+            var includeLocalMetadataOnlyPeople = LocalMetadataOnlyImportPolicy.IsEnabledForItem(item, _libraryManager);
+
             // Ordering by person type to ensure actors and artists are at the front.
             // This is taking advantage of the fact that they both begin with A
             // This should be improved in the future
@@ -698,6 +700,10 @@ namespace Emby.Server.Implementations.Dto
                         }
                     }
 
+                    list.Add(baseItemPerson);
+                }
+                else if (includeLocalMetadataOnlyPeople)
+                {
                     list.Add(baseItemPerson);
                 }
             }
