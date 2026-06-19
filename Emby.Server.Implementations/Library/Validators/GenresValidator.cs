@@ -48,6 +48,14 @@ public class GenresValidator
     public async Task Run(IProgress<double> progress, CancellationToken cancellationToken)
     {
         var names = _itemRepo.GetGenreNames();
+        var localMetadataOnlyImport = PostScanAggregateRefreshOptions.HasLocalMetadataOnlyImportLibrary(
+            _libraryManager.RootFolder.Children,
+            _libraryManager.GetLibraryOptions);
+
+        if (localMetadataOnlyImport)
+        {
+            _logger.LogDebug("LocalMetadataOnlyImport enabled; validating genre metadata without remote refresh");
+        }
 
         var numComplete = 0;
         var count = names.Count;
@@ -58,7 +66,14 @@ public class GenresValidator
             {
                 var item = _libraryManager.GetGenre(name);
 
-                await item.RefreshMetadata(cancellationToken).ConfigureAwait(false);
+                if (localMetadataOnlyImport)
+                {
+                    await item.RefreshMetadata(PostScanAggregateRefreshOptions.CreateValidationOnly(), cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    await item.RefreshMetadata(cancellationToken).ConfigureAwait(false);
+                }
             }
             catch (OperationCanceledException)
             {
