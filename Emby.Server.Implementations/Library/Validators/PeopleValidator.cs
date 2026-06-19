@@ -50,8 +50,11 @@ public class PeopleValidator
     public async Task ValidatePeople(CancellationToken cancellationToken, IProgress<double> progress)
     {
         var people = _libraryManager.GetPeopleNames(new InternalPeopleQuery());
+        var localMetadataOnlyImport = _libraryManager.RootFolder.Children.Any(library =>
+            LocalMetadataOnlyImportPolicy.IsEnabled(_libraryManager.GetLibraryOptions(library)));
 
         var numComplete = 0;
+        var missingLocalMetadataOnlyPeople = 0;
 
         var numPeople = people.Count;
 
@@ -68,7 +71,15 @@ public class PeopleValidator
                 var item = _libraryManager.GetPerson(person);
                 if (item is null)
                 {
-                    _logger.LogWarning("Failed to get person: {Name}", person);
+                    if (localMetadataOnlyImport)
+                    {
+                        missingLocalMetadataOnlyPeople++;
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Failed to get person: {Name}", person);
+                    }
+
                     continue;
                 }
 
@@ -95,6 +106,13 @@ public class PeopleValidator
             percent /= numPeople;
 
             subProgress.Report(100 * percent);
+        }
+
+        if (missingLocalMetadataOnlyPeople > 0)
+        {
+            _logger.LogInformation(
+                "LocalMetadataOnlyImport enabled; skipped validation for {Count} people without metadata entities",
+                missingLocalMetadataOnlyPeople);
         }
 
         var deadEntities = _libraryManager.GetItemList(new InternalItemsQuery
