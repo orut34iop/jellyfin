@@ -13,10 +13,15 @@ namespace MediaBrowser.Controller.Library;
 /// <summary>
 /// Central policy for the local metadata only import mode.
 /// </summary>
+/// <remarks>
+/// The mode is opt-in per library via <see cref="LibraryOptions.LocalMetadataOnlyImport"/>
+/// (toggled by the "极速模式 / Local metadata only" checkbox in the web client's library
+/// settings dialog and persisted to that library's <c>options.xml</c>). The previous
+/// <c>JELLYFIN_LOCAL_METADATA_ONLY_IMPORT</c> environment variable override was removed;
+/// the per-library option is now the sole source of truth.
+/// </remarks>
 public static class LocalMetadataOnlyImportPolicy
 {
-    public const string EnvironmentVariableName = "JELLYFIN_LOCAL_METADATA_ONLY_IMPORT";
-
     public const long PlaceholderVideoLength = 1;
 
     private static readonly HashSet<string> _videoExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -40,28 +45,12 @@ public static class LocalMetadataOnlyImportPolicy
     public static DateTime StableFileTimestampUtc { get; } = new(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
     public static bool IsEnabled(LibraryOptions? libraryOptions)
-        => IsEnvironmentEnabled() || libraryOptions?.LocalMetadataOnlyImport == true;
+        => libraryOptions?.LocalMetadataOnlyImport == true;
 
     public static bool IsEnabledForItem(BaseItem? item, ILibraryManager? libraryManager)
-    {
-        if (IsEnvironmentEnabled())
-        {
-            return true;
-        }
-
-        return item is not null
-            && libraryManager is not null
-            && libraryManager.GetLibraryOptions(item).LocalMetadataOnlyImport;
-    }
-
-    public static bool IsEnvironmentEnabled()
-    {
-        var value = Environment.GetEnvironmentVariable(EnvironmentVariableName);
-        return bool.TryParse(value, out var enabled)
-            ? enabled
-            : string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
-              || string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase);
-    }
+        => item is not null
+           && libraryManager is not null
+           && libraryManager.GetLibraryOptions(item).LocalMetadataOnlyImport;
 
     public static bool IsVideoLikePath(string? path)
     {

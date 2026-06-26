@@ -58,12 +58,6 @@ public class MediaSegmentExtractionTask : IScheduledTask
 
         progress.Report(0);
 
-        if (LocalMetadataOnlyImportPolicy.IsEnvironmentEnabled())
-        {
-            progress.Report(100);
-            return;
-        }
-
         var pagesize = 100;
 
         var query = new InternalItemsQuery

@@ -107,9 +107,6 @@ public class ManagedFileSystemTests
     {
         Skip.If(OperatingSystem.IsWindows());
 
-        var previous = Environment.GetEnvironmentVariable(LocalMetadataOnlyImportPolicy.EnvironmentVariableName);
-        Environment.SetEnvironmentVariable(LocalMetadataOnlyImportPolicy.EnvironmentVariableName, null);
-
         string testFileDir = Path.Combine(Path.GetTempPath(), "jellyfin-test-data");
         string testFileName = Path.Combine(testFileDir, Path.GetRandomFileName() + "-danglingsym.link");
 
@@ -125,17 +122,13 @@ public class ManagedFileSystemTests
         finally
         {
             File.Delete(testFileName);
-            Environment.SetEnvironmentVariable(LocalMetadataOnlyImportPolicy.EnvironmentVariableName, previous);
         }
     }
 
     [SkippableFact]
-    public void GetFileInfo_LocalMetadataOnlyImportDanglingVideoSymlink_ExistsWithPlaceholderMetadata()
+    public void GetFileSystemInfo_LocalMetadataOnlyImportDanglingVideoSymlink_ExistsWithPlaceholderMetadata()
     {
         Skip.If(OperatingSystem.IsWindows());
-
-        var previous = Environment.GetEnvironmentVariable(LocalMetadataOnlyImportPolicy.EnvironmentVariableName);
-        Environment.SetEnvironmentVariable(LocalMetadataOnlyImportPolicy.EnvironmentVariableName, "true");
 
         string testFileDir = Path.Combine(Path.GetTempPath(), "jellyfin-test-data");
         string testFileName = Path.Combine(testFileDir, Path.GetRandomFileName() + ".iso");
@@ -146,7 +139,7 @@ public class ManagedFileSystemTests
             Assert.Equal(0, symlink("thispathdoesntexist", testFileName));
             Assert.True(File.Exists(testFileName));
 
-            var metadata = _sut.GetFileInfo(testFileName);
+            var metadata = _sut.GetFileSystemInfo(testFileName, skipResolvingVideoSymlinks: true);
 
             Assert.True(metadata.Exists);
             Assert.False(metadata.IsDirectory);
@@ -157,7 +150,6 @@ public class ManagedFileSystemTests
         finally
         {
             File.Delete(testFileName);
-            Environment.SetEnvironmentVariable(LocalMetadataOnlyImportPolicy.EnvironmentVariableName, previous);
         }
     }
 
@@ -197,9 +189,6 @@ public class ManagedFileSystemTests
     {
         Skip.If(OperatingSystem.IsWindows());
 
-        var previous = Environment.GetEnvironmentVariable(LocalMetadataOnlyImportPolicy.EnvironmentVariableName);
-        Environment.SetEnvironmentVariable(LocalMetadataOnlyImportPolicy.EnvironmentVariableName, null);
-
         string testFileDir = Path.Combine(Path.GetTempPath(), "jellyfin-test-data", Path.GetRandomFileName());
         string videoPath = Path.Combine(testFileDir, "movie.iso");
         string nfoPath = Path.Combine(testFileDir, "movie.nfo");
@@ -235,8 +224,6 @@ public class ManagedFileSystemTests
             {
                 Directory.Delete(testFileDir, true);
             }
-
-            Environment.SetEnvironmentVariable(LocalMetadataOnlyImportPolicy.EnvironmentVariableName, previous);
         }
     }
 

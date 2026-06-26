@@ -322,7 +322,7 @@ namespace Emby.Server.Implementations.IO
         }
 
         private static bool ShouldUseLocalMetadataOnlyVideoPlaceholder(FileInfo info, bool skipResolvingVideoSymlinks)
-            => (skipResolvingVideoSymlinks || LocalMetadataOnlyImportPolicy.IsEnvironmentEnabled())
+            => skipResolvingVideoSymlinks
                && LocalMetadataOnlyImportPolicy.IsVideoLikePath(info.FullName);
 
         /// <summary>

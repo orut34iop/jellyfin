@@ -1,4 +1,3 @@
-using System;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Configuration;
 using Xunit;
@@ -9,50 +8,20 @@ public class LocalMetadataOnlyImportPolicyTests
 {
     [Fact]
     public void IsEnabled_DefaultLibraryOptions_ReturnsFalse()
-    {
-        var previous = Environment.GetEnvironmentVariable(LocalMetadataOnlyImportPolicy.EnvironmentVariableName);
-        Environment.SetEnvironmentVariable(LocalMetadataOnlyImportPolicy.EnvironmentVariableName, null);
-
-        try
-        {
-            Assert.False(LocalMetadataOnlyImportPolicy.IsEnabled(new LibraryOptions()));
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(LocalMetadataOnlyImportPolicy.EnvironmentVariableName, previous);
-        }
-    }
+        => Assert.False(LocalMetadataOnlyImportPolicy.IsEnabled(new LibraryOptions()));
 
     [Fact]
     public void IsEnabled_LocalMetadataOnlyImportLibraryOption_ReturnsTrue()
-    {
-        var previous = Environment.GetEnvironmentVariable(LocalMetadataOnlyImportPolicy.EnvironmentVariableName);
-        Environment.SetEnvironmentVariable(LocalMetadataOnlyImportPolicy.EnvironmentVariableName, null);
-
-        try
-        {
-            Assert.True(LocalMetadataOnlyImportPolicy.IsEnabled(new LibraryOptions { LocalMetadataOnlyImport = true }));
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(LocalMetadataOnlyImportPolicy.EnvironmentVariableName, previous);
-        }
-    }
+        => Assert.True(LocalMetadataOnlyImportPolicy.IsEnabled(new LibraryOptions { LocalMetadataOnlyImport = true }));
 
     [Fact]
-    public void IsEnabled_EnvironmentVariableTrue_ReturnsTrue()
-    {
-        var previous = Environment.GetEnvironmentVariable(LocalMetadataOnlyImportPolicy.EnvironmentVariableName);
-        Environment.SetEnvironmentVariable(LocalMetadataOnlyImportPolicy.EnvironmentVariableName, "true");
+    public void IsEnabled_NullLibraryOptions_ReturnsFalse()
+        => Assert.False(LocalMetadataOnlyImportPolicy.IsEnabled(null));
 
-        try
-        {
-            Assert.True(LocalMetadataOnlyImportPolicy.IsEnabled(new LibraryOptions()));
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(LocalMetadataOnlyImportPolicy.EnvironmentVariableName, previous);
-        }
+    [Fact]
+    public void IsEnabledForItem_NullItemOrManager_ReturnsFalse()
+    {
+        Assert.False(LocalMetadataOnlyImportPolicy.IsEnabledForItem(null, null));
     }
 
     [Theory]
