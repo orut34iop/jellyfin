@@ -281,3 +281,9 @@ mono_crash.*.json
 # Devcontainer temp files
 .devcontainer/devcontainer-lock.json
 dotnet/
+
+# Local build output (e.g. macOS dmg packaging staging)
+.build/
+
+# Web client checked out at repo root (obtained from a separate jellyfin-web build)
+/jellyfin-web/
