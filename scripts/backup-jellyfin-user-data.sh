@@ -13,6 +13,12 @@ MANIFEST="$DEST_DIR/manifest.txt"
 STOP_APP="false"
 RESTART_APP="false"
 
+# pgrep -f pattern that catches every Jellyfin.app subprocess regardless of
+# version: the Swift menubar launcher at Contents/MacOS/'Jellyfin Server',
+# the modern flattened dotnet apphost at Contents/MacOS/jellyfin (10.11.11+),
+# and the legacy Contents/Resources/jellyfin/jellyfin layout.
+JELLYFIN_PROCESS_PATTERN='[/]Applications/Jellyfin.app/Contents/'
+
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --stop-app)
@@ -48,7 +54,7 @@ if [ ! -d "$SOURCE_DIR" ]; then
 fi
 
 find_jellyfin_pids() {
-    pgrep -f '[/]Applications/Jellyfin.app/Contents/Resources/jellyfin/jellyfin' || true
+    pgrep -f "$JELLYFIN_PROCESS_PATTERN" || true
 }
 
 stop_jellyfin() {
@@ -157,7 +163,7 @@ fi
     echo "backup_dir=$DEST_DIR"
     echo "user_data_dir=$USER_DATA_DEST"
     echo "host=$(hostname)"
-    echo "jellyfin_processes=$(pgrep -fl '/Applications/Jellyfin.app/Contents/Resources/jellyfin/jellyfin' | tr '\n' ';' || true)"
+    echo "jellyfin_processes=$(pgrep -fl "$JELLYFIN_PROCESS_PATTERN" | tr '\n' ';' || true)"
     echo
     echo "[size]"
     du -sh "$USER_DATA_DEST" 2>/dev/null || true

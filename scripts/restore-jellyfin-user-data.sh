@@ -7,6 +7,12 @@ BACKUP_ARG="${1:-latest}"
 STOP_APP="false"
 YES="false"
 
+# pgrep -f pattern that catches every Jellyfin.app subprocess regardless of
+# version: the Swift menubar launcher at Contents/MacOS/'Jellyfin Server',
+# the modern flattened dotnet apphost at Contents/MacOS/jellyfin (10.11.11+),
+# and the legacy Contents/Resources/jellyfin/jellyfin layout.
+JELLYFIN_PROCESS_PATTERN='[/]Applications/Jellyfin.app/Contents/'
+
 shift || true
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -59,20 +65,20 @@ else
     exit 1
 fi
 
-running_pids="$(pgrep -f '/Applications/Jellyfin.app/Contents/Resources/jellyfin/jellyfin' || true)"
+running_pids="$(pgrep -f "$JELLYFIN_PROCESS_PATTERN" || true)"
 if [ -n "$running_pids" ]; then
     if [ "$STOP_APP" = "true" ]; then
         echo "Stopping Jellyfin.app before restore"
         osascript -e 'tell application "Jellyfin" to quit' >/dev/null 2>&1 || true
         for _ in 1 2 3 4 5 6 7 8 9 10; do
-            if ! pgrep -f '/Applications/Jellyfin.app/Contents/Resources/jellyfin/jellyfin' >/dev/null 2>&1; then
+            if ! pgrep -f "$JELLYFIN_PROCESS_PATTERN" >/dev/null 2>&1; then
                 break
             fi
             sleep 1
         done
     fi
 
-    if pgrep -f '/Applications/Jellyfin.app/Contents/Resources/jellyfin/jellyfin' >/dev/null 2>&1; then
+    if pgrep -f "$JELLYFIN_PROCESS_PATTERN" >/dev/null 2>&1; then
         echo "Jellyfin is still running. Stop it before restoring, or rerun with --stop-app." >&2
         exit 1
     fi
