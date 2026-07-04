@@ -2551,6 +2551,7 @@ namespace MediaBrowser.Controller.Entities
         private MetadataRefreshOptions EnsureLocalMetadataOnlyDirectoryService(MetadataRefreshOptions options)
         {
             if (LocalMetadataOnlyImportPolicy.IsEnabledForItem(this, LibraryManager)
+                && !options.EnableRemoteContentProbe
                 && options.DirectoryService is not DirectoryService { SkipResolvingVideoSymlinks: true })
             {
                 return new MetadataRefreshOptions(options, new DirectoryService(FileSystem, true));

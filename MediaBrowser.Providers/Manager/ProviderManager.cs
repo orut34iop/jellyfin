@@ -446,7 +446,22 @@ namespace MediaBrowser.Providers.Manager
         {
             var globalMetadataOptions = GetMetadataOptions(item);
 
-            return GetMetadataProvidersInternal<T>(item, libraryOptions, globalMetadataOptions, false, false);
+            return GetMetadataProvidersInternal<T>(item, libraryOptions, globalMetadataOptions, false, false, false);
+        }
+
+        /// <inheritdoc />
+        public IEnumerable<IMetadataProvider<T>> GetMetadataProviders<T>(BaseItem item, LibraryOptions libraryOptions, MetadataRefreshOptions refreshOptions)
+            where T : BaseItem
+        {
+            var globalMetadataOptions = GetMetadataOptions(item);
+
+            return GetMetadataProvidersInternal<T>(
+                item,
+                libraryOptions,
+                globalMetadataOptions,
+                false,
+                false,
+                refreshOptions.EnableRemoteContentProbe);
         }
 
         /// <inheritdoc />
@@ -455,7 +470,7 @@ namespace MediaBrowser.Providers.Manager
             return _savers.Where(i => IsSaverEnabledForItem(i, item, libraryOptions, ItemUpdateType.MetadataEdit, false));
         }
 
-        private IEnumerable<IMetadataProvider<T>> GetMetadataProvidersInternal<T>(BaseItem item, LibraryOptions libraryOptions, MetadataOptions globalMetadataOptions, bool includeDisabled, bool forceEnableInternetMetadata)
+        private IEnumerable<IMetadataProvider<T>> GetMetadataProvidersInternal<T>(BaseItem item, LibraryOptions libraryOptions, MetadataOptions globalMetadataOptions, bool includeDisabled, bool forceEnableInternetMetadata, bool enableRemoteContentProbe)
             where T : BaseItem
         {
             var localMetadataReaderOrder = libraryOptions.LocalMetadataReaderOrder ?? globalMetadataOptions.LocalMetadataReaderOrder;
@@ -465,7 +480,9 @@ namespace MediaBrowser.Providers.Manager
 
             if (LocalMetadataOnlyImportPolicy.IsEnabled(libraryOptions))
             {
-                metadataProviders = metadataProviders.Where(i => i is ILocalMetadataProvider);
+                metadataProviders = metadataProviders.Where(i =>
+                    i is ILocalMetadataProvider
+                    || (enableRemoteContentProbe && i is IMediaInfoProvider));
             }
 
             return metadataProviders
@@ -631,7 +648,7 @@ namespace MediaBrowser.Providers.Manager
         private void AddMetadataPlugins<T>(List<MetadataPlugin> list, T item, LibraryOptions libraryOptions, MetadataOptions options)
             where T : BaseItem
         {
-            var providers = GetMetadataProvidersInternal<T>(item, libraryOptions, options, true, true).ToList();
+            var providers = GetMetadataProvidersInternal<T>(item, libraryOptions, options, true, true, false).ToList();
 
             // Locals
             list.AddRange(providers.Where(i => i is ILocalMetadataProvider).Select(i => new MetadataPlugin
@@ -849,7 +866,7 @@ namespace MediaBrowser.Providers.Manager
 
             var options = GetMetadataOptions(referenceItem);
 
-            var providers = GetMetadataProvidersInternal<TItemType>(referenceItem, libraryOptions, options, searchInfo.IncludeDisabledProviders, false)
+            var providers = GetMetadataProvidersInternal<TItemType>(referenceItem, libraryOptions, options, searchInfo.IncludeDisabledProviders, false, false)
                 .OfType<IRemoteSearchProvider<TLookupType>>();
 
             if (!string.IsNullOrEmpty(searchInfo.SearchProviderName))

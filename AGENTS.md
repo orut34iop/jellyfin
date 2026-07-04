@@ -68,6 +68,12 @@ Run tests with coverage (as CI does):
 dotnet test Jellyfin.sln --configuration Release --collect:"XPlat Code Coverage" --settings tests/coverletArgs.runsettings --verbosity minimal
 ```
 
+## Mandatory local workflow
+
+- After any code change, promptly commit the finished change and push the branch.
+- Every local compile or publish must include the build date/time in the version metadata. `Directory.Build.targets` generates `AssemblyInformationalVersion` automatically; for publish/install builds, use a single timestamp such as `BUILD_STAMP=$(date '+%Y%m%d%H%M%S')` and pass `/p:JellyfinBuildDateTime=$BUILD_STAMP` so all projects share the same version suffix. `AssemblyVersion` and `AssemblyFileVersion` in `SharedVersion.cs` must remain numeric.
+- After any code change, rebuild the macOS arm64 app, install it to `/Applications/Jellyfin.app`, and verify it starts successfully. The minimum verification is opening `/Applications/Jellyfin.app`, confirming `http://127.0.0.1:8096/web/index.html` returns HTTP 200, and confirming `/System/Info/Public` reports the timestamped version.
+
 Restore packages:
 
 ```bash

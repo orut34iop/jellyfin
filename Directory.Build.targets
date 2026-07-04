@@ -1,0 +1,27 @@
+<Project>
+  <PropertyGroup>
+    <JellyfinBuildDateTime Condition=" '$(JellyfinBuildDateTime)' == '' ">$([System.DateTime]::Now.ToString('yyyyMMddHHmmss'))</JellyfinBuildDateTime>
+    <JellyfinSharedVersionFile>$(MSBuildThisFileDirectory)SharedVersion.cs</JellyfinSharedVersionFile>
+    <JellyfinSharedVersionContent Condition=" '$(JellyfinBaseInformationalVersion)' == '' AND Exists('$(JellyfinSharedVersionFile)') ">$([System.IO.File]::ReadAllText('$(JellyfinSharedVersionFile)'))</JellyfinSharedVersionContent>
+    <JellyfinBaseInformationalVersion Condition=" '$(JellyfinBaseInformationalVersion)' == '' AND '$(JellyfinSharedVersionContent)' != '' ">$([System.Text.RegularExpressions.Regex]::Match('$(JellyfinSharedVersionContent)', 'AssemblyVersion\("([^"]+)"\)').Groups[1].Value)</JellyfinBaseInformationalVersion>
+    <JellyfinBaseInformationalVersion Condition=" '$(JellyfinBaseInformationalVersion)' == '' ">10.11.11</JellyfinBaseInformationalVersion>
+    <InformationalVersion Condition=" '$(InformationalVersion)' == '' ">$(JellyfinBaseInformationalVersion)-$(JellyfinBuildDateTime)</InformationalVersion>
+  </PropertyGroup>
+
+  <Target Name="GenerateJellyfinBuildVersion"
+          BeforeTargets="CoreCompile"
+          Condition=" '$(GenerateAssemblyInfo)' == 'false' ">
+    <PropertyGroup>
+      <JellyfinBuildVersionFile>$(IntermediateOutputPath)JellyfinBuildVersion.g.cs</JellyfinBuildVersionFile>
+    </PropertyGroup>
+
+    <WriteLinesToFile
+      File="$(JellyfinBuildVersionFile)"
+      Lines="[assembly: System.Reflection.AssemblyInformationalVersion(&quot;$(InformationalVersion)&quot;)]"
+      Overwrite="true" />
+
+    <ItemGroup>
+      <Compile Include="$(JellyfinBuildVersionFile)" />
+    </ItemGroup>
+  </Target>
+</Project>

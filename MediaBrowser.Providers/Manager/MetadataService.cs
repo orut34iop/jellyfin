@@ -617,7 +617,7 @@ namespace MediaBrowser.Providers.Manager
         protected IEnumerable<IMetadataProvider> GetProviders(BaseItem item, LibraryOptions libraryOptions, MetadataRefreshOptions options, bool isFirstRefresh, bool requiresRefresh)
         {
             // Get providers to refresh
-            var providers = ProviderManager.GetMetadataProviders<TItemType>(item, libraryOptions).ToList();
+            var providers = ProviderManager.GetMetadataProviders<TItemType>(item, libraryOptions, options).ToList();
 
             var metadataRefreshMode = options.MetadataRefreshMode;
 

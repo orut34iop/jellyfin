@@ -83,7 +83,8 @@ namespace MediaBrowser.Providers.MediaInfo
             CancellationToken cancellationToken)
             where T : Video
         {
-            if (LocalMetadataOnlyImportPolicy.IsEnabledForItem(item, _libraryManager))
+            if (LocalMetadataOnlyImportPolicy.IsEnabledForItem(item, _libraryManager)
+                && !options.EnableRemoteContentProbe)
             {
                 _logger.LogDebug("LocalMetadataOnlyImport enabled; skipping media file probing for {Path}", item.Path ?? item.Name);
                 return ItemUpdateType.MetadataImport;

@@ -446,6 +446,33 @@ namespace Jellyfin.Providers.Tests.Manager
             Assert.Same(localProvider, actualProviders[0]);
         }
 
+        [Fact]
+        public void GetMetadataProviders_LocalMetadataOnlyImportWithRemoteContentProbe_ReturnsLocalAndMediaInfoProviders()
+        {
+            var item = new MetadataTestItem();
+            var localProvider = MockIMetadataProviderMapper<MetadataTestItem, MetadataTestItemInfo>(nameof(ILocalMetadataProvider), "local");
+            var remoteProvider = MockIMetadataProviderMapper<MetadataTestItem, MetadataTestItemInfo>(nameof(IRemoteMetadataProvider), "remote");
+            var customProvider = MockIMetadataProviderMapper<MetadataTestItem, MetadataTestItemInfo>(nameof(ICustomMetadataProvider), "custom");
+            var mediaInfoProvider = new Mock<ICustomMetadataProvider<MetadataTestItem>>(MockBehavior.Strict);
+            mediaInfoProvider.As<IMediaInfoProvider>();
+            mediaInfoProvider.Setup(i => i.Name)
+                .Returns("media info");
+            var libraryOptions = new LibraryOptions { LocalMetadataOnlyImport = true };
+            var refreshOptions = new MetadataRefreshOptions(Mock.Of<IDirectoryService>())
+            {
+                EnableRemoteContentProbe = true
+            };
+
+            using var providerManager = GetProviderManager(libraryOptions: libraryOptions);
+            AddParts(providerManager, metadataProviders: new IMetadataProvider[] { localProvider, remoteProvider, customProvider, mediaInfoProvider.Object });
+
+            var actualProviders = providerManager.GetMetadataProviders<MetadataTestItem>(item, libraryOptions, refreshOptions).ToArray();
+
+            Assert.Equal(2, actualProviders.Length);
+            Assert.Same(localProvider, actualProviders[0]);
+            Assert.Same(mediaInfoProvider.Object, actualProviders[1]);
+        }
+
         private static void GetMetadataProviders_CanRefreshMetadata_Tester(
             string providerType,
             bool expected,

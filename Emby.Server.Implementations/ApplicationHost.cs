@@ -154,8 +154,17 @@ namespace Emby.Server.Implementations
             Logger = LoggerFactory.CreateLogger<ApplicationHost>();
             _deviceId = new DeviceId(ApplicationPaths, LoggerFactory.CreateLogger<DeviceId>());
 
-            ApplicationVersion = typeof(ApplicationHost).Assembly.GetName().Version;
+            var applicationAssembly = typeof(ApplicationHost).Assembly;
+            ApplicationVersion = applicationAssembly.GetName().Version;
             ApplicationVersionString = ApplicationVersion.ToString(3);
+
+            var informationalVersion = applicationAssembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
+            var buildMetadataStart = informationalVersion?.IndexOf('-', StringComparison.Ordinal) ?? -1;
+            if (buildMetadataStart >= 0)
+            {
+                ApplicationVersionString += informationalVersion[buildMetadataStart..];
+            }
+
             ApplicationUserAgent = Name.Replace(' ', '-') + "/" + ApplicationVersionString;
 
             _xmlSerializer = new MyXmlSerializer();
