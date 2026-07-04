@@ -188,6 +188,11 @@ namespace Emby.Server.Implementations.Library
                 mediaSources = GetStaticMediaSources(item, enablePathSubstitution, user);
             }
 
+            if (allowMediaProbe)
+            {
+                await AddMissingMediaInfoWithProbe(item, mediaSources, cancellationToken).ConfigureAwait(false);
+            }
+
             var dynamicMediaSources = await GetDynamicMediaSources(item, cancellationToken).ConfigureAwait(false);
 
             var list = new List<MediaSourceInfo>();
@@ -221,6 +226,36 @@ namespace Emby.Server.Implementations.Library
             }
 
             return SortMediaSources(list).ToArray();
+        }
+
+        private async Task AddMissingMediaInfoWithProbe(BaseItem item, IReadOnlyList<MediaSourceInfo> mediaSources, CancellationToken cancellationToken)
+        {
+            if (item.MediaType != MediaType.Audio && item.MediaType != MediaType.Video)
+            {
+                return;
+            }
+
+            var isAudio = item.MediaType == MediaType.Audio;
+            var requiredStreamType = isAudio ? MediaStreamType.Audio : MediaStreamType.Video;
+
+            foreach (var mediaSource in mediaSources)
+            {
+                if (mediaSource.Type == MediaSourceType.Placeholder
+                    || !mediaSource.SupportsProbing
+                    || mediaSource.MediaStreams.Any(i => i.Type == requiredStreamType))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    await AddMediaInfoWithProbe(mediaSource, isAudio, null, false, false, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error probing media source {MediaSourceId} for {Path}", mediaSource.Id, mediaSource.Path);
+                }
+            }
         }
 
         /// <inheritdoc />>
