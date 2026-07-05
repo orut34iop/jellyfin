@@ -285,7 +285,7 @@ public static class StreamingHelpers
     /// <param name="state">The state.</param>
     /// <param name="mediaSource">The mediaSource.</param>
     /// <returns>System.String.</returns>
-    private static string GetOutputFileExtension(StreamState state, MediaSourceInfo? mediaSource)
+    internal static string GetOutputFileExtension(StreamState state, MediaSourceInfo? mediaSource)
     {
         var ext = Path.GetExtension(state.RequestedUrl);
         if (!string.IsNullOrEmpty(ext))
@@ -355,11 +355,35 @@ public static class StreamingHelpers
         // Fallback to the container of mediaSource
         if (!string.IsNullOrEmpty(mediaSource?.Container))
         {
+            var mediaSourceExtension = GetMediaSourceFileExtension(mediaSource);
+            if (!string.IsNullOrEmpty(mediaSourceExtension))
+            {
+                return mediaSourceExtension;
+            }
+
             var idx = mediaSource.Container.IndexOf(',', StringComparison.OrdinalIgnoreCase);
             return '.' + (idx == -1 ? mediaSource.Container : mediaSource.Container[..idx]).Trim();
         }
 
         throw new InvalidOperationException("Failed to find an appropriate file extension");
+    }
+
+    private static string? GetMediaSourceFileExtension(MediaSourceInfo mediaSource)
+    {
+        if (string.IsNullOrEmpty(mediaSource.Path) || string.IsNullOrEmpty(mediaSource.Container))
+        {
+            return null;
+        }
+
+        var extension = Path.GetExtension(mediaSource.Path);
+        if (string.IsNullOrEmpty(extension))
+        {
+            return null;
+        }
+
+        var extensionContainer = extension.TrimStart('.');
+        var containers = mediaSource.Container.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return containers.Contains(extensionContainer, StringComparer.OrdinalIgnoreCase) ? extension : null;
     }
 
     /// <summary>
