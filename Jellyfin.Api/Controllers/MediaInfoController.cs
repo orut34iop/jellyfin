@@ -8,6 +8,7 @@ using Jellyfin.Api.Attributes;
 using Jellyfin.Api.Extensions;
 using Jellyfin.Api.Helpers;
 using Jellyfin.Api.Models.MediaInfoDtos;
+using Jellyfin.Data.Enums;
 using Jellyfin.Extensions;
 using MediaBrowser.Common.Extensions;
 using MediaBrowser.Controller.Devices;
@@ -84,7 +85,9 @@ public class MediaInfoController : BaseJellyfinApiController
             return NotFound();
         }
 
-        return await _mediaInfoHelper.GetPlaybackInfo(item, user).ConfigureAwait(false);
+        var info = await _mediaInfoHelper.GetPlaybackInfo(item, user).ConfigureAwait(false);
+        ApplyMoonfinLocalFilePaths(info, item);
+        return info;
     }
 
     /// <summary>
@@ -245,8 +248,44 @@ public class MediaInfoController : BaseJellyfinApiController
             }
         }
 
+        ApplyMoonfinLocalFilePaths(info, item);
         return info;
     }
+
+    private void ApplyMoonfinLocalFilePaths(PlaybackInfoResponse info, BaseItem item)
+    {
+        if (!HttpContext.IsLocal()
+            || !IsMoonfinClient(User.GetClient()))
+        {
+            return;
+        }
+
+        foreach (var mediaSource in info.MediaSources)
+        {
+            if (mediaSource.Protocol != MediaProtocol.File)
+            {
+                continue;
+            }
+
+            var sourceItem = item;
+            if (Guid.TryParse(mediaSource.Id, out var mediaSourceItemId)
+                && mediaSourceItemId != item.Id)
+            {
+                sourceItem = _libraryManager.GetItemById<BaseItem>(mediaSourceItemId) ?? item;
+            }
+
+            if (string.IsNullOrWhiteSpace(sourceItem.Path)
+                || !System.IO.File.Exists(sourceItem.Path))
+            {
+                continue;
+            }
+
+            mediaSource.Path = sourceItem.Path;
+        }
+    }
+
+    private static bool IsMoonfinClient(string? client)
+        => client?.Contains("Moonfin", StringComparison.OrdinalIgnoreCase) == true;
 
     /// <summary>
     /// Opens a media source.
