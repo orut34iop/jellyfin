@@ -8,7 +8,6 @@ using Jellyfin.Api.Attributes;
 using Jellyfin.Api.Extensions;
 using Jellyfin.Api.Helpers;
 using Jellyfin.Api.Models.MediaInfoDtos;
-using Jellyfin.Data.Enums;
 using Jellyfin.Extensions;
 using MediaBrowser.Common.Extensions;
 using MediaBrowser.Controller.Devices;
@@ -254,38 +253,18 @@ public class MediaInfoController : BaseJellyfinApiController
 
     private void ApplyMoonfinLocalFilePaths(PlaybackInfoResponse info, BaseItem item)
     {
-        if (!HttpContext.IsLocal()
-            || !IsMoonfinClient(User.GetClient()))
-        {
-            return;
-        }
-
-        foreach (var mediaSource in info.MediaSources)
-        {
-            if (mediaSource.Protocol != MediaProtocol.File)
-            {
-                continue;
-            }
-
-            var sourceItem = item;
-            if (Guid.TryParse(mediaSource.Id, out var mediaSourceItemId)
-                && mediaSourceItemId != item.Id)
-            {
-                sourceItem = _libraryManager.GetItemById<BaseItem>(mediaSourceItemId) ?? item;
-            }
-
-            if (string.IsNullOrWhiteSpace(sourceItem.Path)
-                || !System.IO.File.Exists(sourceItem.Path))
-            {
-                continue;
-            }
-
-            mediaSource.Path = sourceItem.Path;
-        }
+        MoonfinLocalPlaybackHelper.ApplyLocalFilePaths(
+            info,
+            item,
+            mediaSourceItemId => _libraryManager.GetItemById<BaseItem>(mediaSourceItemId),
+            HttpContext.IsLocal(),
+            User.GetClient(),
+            (mediaSource, path) => _logger.LogInformation(
+                "Using local file path for Moonfin playback. ItemId: {ItemId}, MediaSourceId: {MediaSourceId}, Path: {Path}",
+                item.Id,
+                mediaSource.Id,
+                path));
     }
-
-    private static bool IsMoonfinClient(string? client)
-        => client?.Contains("Moonfin", StringComparison.OrdinalIgnoreCase) == true;
 
     /// <summary>
     /// Opens a media source.
