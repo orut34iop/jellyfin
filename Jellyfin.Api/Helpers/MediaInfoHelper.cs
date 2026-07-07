@@ -83,12 +83,14 @@ public class MediaInfoHelper
     /// <param name="user">The user.</param>
     /// <param name="mediaSourceId">Media source id.</param>
     /// <param name="liveStreamId">Live stream id.</param>
+    /// <param name="allowMediaProbe">Whether media probing is allowed.</param>
     /// <returns>A <see cref="Task"/> containing the <see cref="PlaybackInfoResponse"/>.</returns>
     public async Task<PlaybackInfoResponse> GetPlaybackInfo(
         BaseItem item,
         User? user,
         string? mediaSourceId = null,
-        string? liveStreamId = null)
+        string? liveStreamId = null,
+        bool allowMediaProbe = true)
     {
         var result = new PlaybackInfoResponse();
 
@@ -96,7 +98,7 @@ public class MediaInfoHelper
         if (string.IsNullOrWhiteSpace(liveStreamId))
         {
             // TODO (moved from MediaBrowser.Api) handle supportedLiveMediaTypes?
-            var mediaSourcesList = await _mediaSourceManager.GetPlaybackMediaSources(item, user, true, true, CancellationToken.None).ConfigureAwait(false);
+            var mediaSourcesList = await _mediaSourceManager.GetPlaybackMediaSources(item, user, allowMediaProbe, true, CancellationToken.None).ConfigureAwait(false);
 
             if (string.IsNullOrWhiteSpace(mediaSourceId))
             {

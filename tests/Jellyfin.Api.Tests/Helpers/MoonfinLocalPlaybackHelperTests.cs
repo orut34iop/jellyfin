@@ -124,6 +124,76 @@ namespace Jellyfin.Api.Tests.Helpers
             Assert.Equal(OriginalPath, mediaSource.Path);
         }
 
+        [Fact]
+        public static void ShouldSkipMediaProbe_LocalMoonfinFileSource_ReturnsTrue()
+        {
+            var path = Path.GetTempFileName();
+            try
+            {
+                var item = CreateItem(path);
+                var mediaSource = CreateMediaSource(item.Id, "/substituted/path.mkv");
+
+                Assert.True(MoonfinLocalPlaybackHelper.ShouldSkipMediaProbe(
+                    new[] { mediaSource },
+                    item,
+                    _ => null,
+                    true,
+                    "Moonfin for macOS",
+                    null));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Fact]
+        public static void ShouldSkipMediaProbe_RequestedMediaSourceDoesNotMatch_ReturnsFalse()
+        {
+            var path = Path.GetTempFileName();
+            try
+            {
+                var item = CreateItem(path);
+                var mediaSource = CreateMediaSource(item.Id, "/substituted/path.mkv");
+
+                Assert.False(MoonfinLocalPlaybackHelper.ShouldSkipMediaProbe(
+                    new[] { mediaSource },
+                    item,
+                    _ => null,
+                    true,
+                    "Moonfin for macOS",
+                    Guid.NewGuid().ToString("N")));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
+        [Fact]
+        public static void ShouldSkipMediaProbe_NonFileProtocol_ReturnsFalse()
+        {
+            var path = Path.GetTempFileName();
+            try
+            {
+                var item = CreateItem(path);
+                var mediaSource = CreateMediaSource(item.Id, "https://example.invalid/video.m3u8");
+                mediaSource.Protocol = MediaProtocol.Http;
+
+                Assert.False(MoonfinLocalPlaybackHelper.ShouldSkipMediaProbe(
+                    new[] { mediaSource },
+                    item,
+                    _ => null,
+                    true,
+                    "Moonfin for macOS",
+                    null));
+            }
+            finally
+            {
+                File.Delete(path);
+            }
+        }
+
         private static BaseItem CreateItem(string path)
             => new Movie
             {

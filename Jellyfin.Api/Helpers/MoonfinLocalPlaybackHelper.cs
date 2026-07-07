@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Jellyfin.Data.Enums;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Model.Dto;
@@ -45,6 +47,31 @@ internal static class MoonfinLocalPlaybackHelper
         return string.IsNullOrWhiteSpace(sourceItem.Path) || !File.Exists(sourceItem.Path)
             ? null
             : sourceItem.Path;
+    }
+
+    /// <summary>
+    /// Checks whether the request can use Moonfin local file playback without probing media streams.
+    /// </summary>
+    /// <param name="mediaSources">The media sources to inspect.</param>
+    /// <param name="item">The current item.</param>
+    /// <param name="getItemById">Resolves alternate media source item ids.</param>
+    /// <param name="isLocalRequest">Whether the request comes from the local host.</param>
+    /// <param name="client">The authenticated client name.</param>
+    /// <param name="mediaSourceId">The requested media source id.</param>
+    /// <returns><c>true</c> when media probing can be skipped.</returns>
+    internal static bool ShouldSkipMediaProbe(
+        IReadOnlyList<MediaSourceInfo> mediaSources,
+        BaseItem item,
+        Func<Guid, BaseItem?> getItemById,
+        bool isLocalRequest,
+        string? client,
+        string? mediaSourceId)
+    {
+        var selectedMediaSources = string.IsNullOrWhiteSpace(mediaSourceId)
+            ? mediaSources
+            : mediaSources.Where(i => string.Equals(i.Id, mediaSourceId, StringComparison.OrdinalIgnoreCase));
+
+        return selectedMediaSources.Any(mediaSource => TryResolveLocalFilePath(mediaSource, item, getItemById, isLocalRequest, client) is not null);
     }
 
     /// <summary>

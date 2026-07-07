@@ -84,7 +84,8 @@ public class MediaInfoController : BaseJellyfinApiController
             return NotFound();
         }
 
-        var info = await _mediaInfoHelper.GetPlaybackInfo(item, user).ConfigureAwait(false);
+        var skipMoonfinMediaProbe = ShouldSkipMoonfinMediaProbe(item, user, null, null);
+        var info = await _mediaInfoHelper.GetPlaybackInfo(item, user, allowMediaProbe: !skipMoonfinMediaProbe).ConfigureAwait(false);
         ApplyMoonfinLocalFilePaths(info, item);
         return info;
     }
@@ -176,11 +177,13 @@ public class MediaInfoController : BaseJellyfinApiController
             return NotFound();
         }
 
+        var skipMoonfinMediaProbe = ShouldSkipMoonfinMediaProbe(item, user, mediaSourceId, liveStreamId);
         var info = await _mediaInfoHelper.GetPlaybackInfo(
                 item,
                 user,
                 mediaSourceId,
-                liveStreamId)
+                liveStreamId,
+                !skipMoonfinMediaProbe)
             .ConfigureAwait(false);
 
         if (info.ErrorCode is not null)
@@ -188,7 +191,7 @@ public class MediaInfoController : BaseJellyfinApiController
             return info;
         }
 
-        if (profile is not null)
+        if (profile is not null && !skipMoonfinMediaProbe)
         {
             // set device specific data
             foreach (var mediaSource in info.MediaSources)
@@ -264,6 +267,33 @@ public class MediaInfoController : BaseJellyfinApiController
                 item.Id,
                 mediaSource.Id,
                 path));
+    }
+
+    private bool ShouldSkipMoonfinMediaProbe(BaseItem item, Jellyfin.Database.Implementations.Entities.User? user, string? mediaSourceId, string? liveStreamId)
+    {
+        if (!string.IsNullOrWhiteSpace(liveStreamId))
+        {
+            return false;
+        }
+
+        var mediaSources = _mediaSourceManager.GetStaticMediaSources(item, true, user);
+        var shouldSkip = MoonfinLocalPlaybackHelper.ShouldSkipMediaProbe(
+            mediaSources,
+            item,
+            mediaSourceItemId => _libraryManager.GetItemById<BaseItem>(mediaSourceItemId),
+            HttpContext.IsLocal(),
+            User.GetClient(),
+            mediaSourceId);
+
+        if (shouldSkip)
+        {
+            _logger.LogInformation(
+                "Skipping media probe for Moonfin local file playback. ItemId: {ItemId}, MediaSourceId: {MediaSourceId}",
+                item.Id,
+                mediaSourceId);
+        }
+
+        return shouldSkip;
     }
 
     /// <summary>
