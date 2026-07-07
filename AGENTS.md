@@ -152,6 +152,43 @@ The solution is split into three broad layers. Avoid introducing circular projec
 - Swagger/ReDoc is available at `/api-docs/swagger` and `/api-docs/redoc`.
 - The API supports camelCase and PascalCase JSON via custom output formatters.
 
+### Moonfin local file playback customization
+
+This fork contains a Jellyfin API customization for same-host Moonfin playback of local `File` protocol media sources. The goal is to let Moonfin open the existing library symlink path directly instead of streaming or transcoding through Jellyfin when Jellyfin Server and Moonfin run on the same machine.
+
+Relevant commits on `release-10.11.z`:
+
+- `62f1878db3 Enable local Moonfin media paths`
+- `d42b35dff8 Harden Moonfin local path playback`
+- `0a0fb145a9 Skip probing Moonfin local file playback`
+
+Relevant files:
+
+- `Jellyfin.Api/Controllers/MediaInfoController.cs`
+- `Jellyfin.Api/Helpers/MoonfinLocalPlaybackHelper.cs`
+- `Jellyfin.Api/Helpers/MediaInfoHelper.cs`
+- `tests/Jellyfin.Api.Tests/Helpers/MoonfinLocalPlaybackHelperTests.cs`
+
+The special path is intentionally narrow. It applies only when all of these are true:
+
+- The PlaybackInfo request is local (`HttpContext.IsLocal()`).
+- The authenticated client name contains `Moonfin`, case-insensitive.
+- The selected `MediaSourceInfo.Protocol` is `MediaProtocol.File`.
+- The resolved item path exists on disk (`File.Exists(item.Path)`).
+
+When eligible, Jellyfin writes the library item path into the existing `MediaSourceInfo.Path` field. No new API field or config option is added. For eligible Moonfin local file playback, `MediaInfoController` may call `MediaInfoHelper.GetPlaybackInfo(..., allowMediaProbe: false)` and skip POST `SetDeviceSpecificData`; Moonfin should treat `Protocol = File` plus a local absolute `Path` as directly playable and must not require populated `VideoCodec` or `AudioCodec`.
+
+Expected Jellyfin log lines for a successful local-path response:
+
+```text
+Skipping media probe for Moonfin local file playback. ItemId: ..., MediaSourceId: ...
+Using local file path for Moonfin playback. ItemId: ..., MediaSourceId: ..., Path: "/Users/wiz/media/..."
+```
+
+Expected Moonfin-side diagnostic evidence is `playMethod = directPlay` and `mediaKitOpenStart.url.isLocalFilePath = true`. If Moonfin opens `/videos/{id}/master.m3u8` or `/Videos/{id}/stream`, playback is still going through Jellyfin HTTP/HLS and this customization was not used end-to-end.
+
+This customization does not fix general Jellyfin symlink probing or `RunTimeTicks` extraction for all clients. If media duration/probe behavior is wrong outside this same-host Moonfin local-path path, investigate the normal media probe and metadata refresh flow instead of broadening this special case.
+
 ### Database
 
 - `JellyfinDbContext` is the single EF Core context. Provider selection is abstracted through `IJellyfinDatabaseProvider`.
