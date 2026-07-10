@@ -34,13 +34,14 @@ public class DtoServiceTests
             Type = PersonKind.Actor
         };
 
-        var dto = AttachPeople(movie, [person], localMetadataOnlyImport: true);
+        var (dto, libraryManager) = AttachPeople(movie, [person], localMetadataOnlyImport: true);
 
         var attachedPerson = Assert.Single(dto.People);
         Assert.Equal("Local Actor", attachedPerson.Name);
         Assert.Equal("Lead", attachedPerson.Role);
         Assert.Equal(PersonKind.Actor, attachedPerson.Type);
         Assert.Equal(Guid.Empty, attachedPerson.Id);
+        libraryManager.Verify(x => x.GetPerson(It.IsAny<string>()), Times.Never);
     }
 
     [Fact]
@@ -54,12 +55,16 @@ public class DtoServiceTests
             Type = PersonKind.Actor
         };
 
-        var dto = AttachPeople(movie, [person], localMetadataOnlyImport: false);
+        var (dto, libraryManager) = AttachPeople(movie, [person], localMetadataOnlyImport: false);
 
         Assert.Empty(dto.People);
+        libraryManager.Verify(x => x.GetPerson("Missing Person Entity"), Times.Once);
     }
 
-    private static BaseItemDto AttachPeople(Movie movie, IReadOnlyList<PersonInfo> people, bool localMetadataOnlyImport)
+    private static (BaseItemDto Dto, Mock<ILibraryManager> LibraryManager) AttachPeople(
+        Movie movie,
+        IReadOnlyList<PersonInfo> people,
+        bool localMetadataOnlyImport)
     {
         var libraryManager = new Mock<ILibraryManager>();
         libraryManager.Setup(x => x.GetPeople(movie)).Returns(people);
@@ -87,6 +92,6 @@ public class DtoServiceTests
             .GetMethod("AttachPeople", BindingFlags.Instance | BindingFlags.NonPublic)!
             .Invoke(dtoService, [dto, movie, null]);
 
-        return dto;
+        return (dto, libraryManager);
     }
 }

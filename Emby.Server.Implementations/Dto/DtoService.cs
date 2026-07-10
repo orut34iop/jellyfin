@@ -646,6 +646,19 @@ namespace Emby.Server.Implementations.Dto
                 })
                 .ToList();
 
+            if (includeLocalMetadataOnlyPeople)
+            {
+                // Local-only imports intentionally skip creating Person library items,
+                // so avoid a guaranteed lookup miss per person.
+                dto.People = people.Select(person => new BaseItemPerson
+                {
+                    Name = person.Name,
+                    Role = person.Role,
+                    Type = person.Type
+                }).ToArray();
+                return;
+            }
+
             var list = new List<BaseItemPerson>();
 
             Dictionary<string, Person> dictionary = people.Select(p => p.Name)
@@ -700,10 +713,6 @@ namespace Emby.Server.Implementations.Dto
                         }
                     }
 
-                    list.Add(baseItemPerson);
-                }
-                else if (includeLocalMetadataOnlyPeople)
-                {
                     list.Add(baseItemPerson);
                 }
             }
