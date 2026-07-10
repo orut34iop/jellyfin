@@ -85,6 +85,11 @@ public class ImageController : BaseJellyfinApiController
     private static CryptoStream GetFromBase64Stream(Stream inputStream)
         => new CryptoStream(inputStream, new FromBase64Transform(), CryptoStreamMode.Read);
 
+    private BaseItem? GetItem(Guid itemId)
+        => itemId.IsEmpty()
+            ? null
+            : _libraryManager.GetItemById<BaseItem>(itemId, User.GetUserId());
+
     /// <summary>
     /// Sets the user image.
     /// </summary>
@@ -297,7 +302,7 @@ public class ImageController : BaseJellyfinApiController
         [FromRoute, Required] ImageType imageType,
         [FromQuery] int? imageIndex)
     {
-        var item = _libraryManager.GetItemById<BaseItem>(itemId, User.GetUserId());
+        var item = GetItem(itemId);
         if (item is null)
         {
             return NotFound();
@@ -325,7 +330,7 @@ public class ImageController : BaseJellyfinApiController
         [FromRoute, Required] ImageType imageType,
         [FromRoute] int imageIndex)
     {
-        var item = _libraryManager.GetItemById<BaseItem>(itemId, User.GetUserId());
+        var item = GetItem(itemId);
         if (item is null)
         {
             return NotFound();
@@ -354,7 +359,7 @@ public class ImageController : BaseJellyfinApiController
         [FromRoute, Required] Guid itemId,
         [FromRoute, Required] ImageType imageType)
     {
-        var item = _libraryManager.GetItemById<BaseItem>(itemId, User.GetUserId());
+        var item = GetItem(itemId);
         if (item is null)
         {
             return NotFound();
@@ -398,7 +403,7 @@ public class ImageController : BaseJellyfinApiController
         [FromRoute, Required] ImageType imageType,
         [FromRoute] int imageIndex)
     {
-        var item = _libraryManager.GetItemById<BaseItem>(itemId, User.GetUserId());
+        var item = GetItem(itemId);
         if (item is null)
         {
             return NotFound();
@@ -441,7 +446,7 @@ public class ImageController : BaseJellyfinApiController
         [FromRoute, Required] int imageIndex,
         [FromQuery, Required] int newIndex)
     {
-        var item = _libraryManager.GetItemById<BaseItem>(itemId, User.GetUserId());
+        var item = GetItem(itemId);
         if (item is null)
         {
             return NotFound();
@@ -464,7 +469,7 @@ public class ImageController : BaseJellyfinApiController
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IEnumerable<ImageInfo>>> GetItemImageInfos([FromRoute, Required] Guid itemId)
     {
-        var item = _libraryManager.GetItemById<BaseItem>(itemId, User.GetUserId());
+        var item = GetItem(itemId);
         if (item is null)
         {
             return NotFound();
@@ -567,7 +572,7 @@ public class ImageController : BaseJellyfinApiController
         [FromQuery] string? foregroundLayer,
         [FromQuery] int? imageIndex)
     {
-        var item = _libraryManager.GetItemById<BaseItem>(itemId, User.GetUserId());
+        var item = GetItem(itemId);
         if (item is null)
         {
             return NotFound();
@@ -645,7 +650,7 @@ public class ImageController : BaseJellyfinApiController
         [FromQuery] string? backgroundColor,
         [FromQuery] string? foregroundLayer)
     {
-        var item = _libraryManager.GetItemById<BaseItem>(itemId, User.GetUserId());
+        var item = GetItem(itemId);
         if (item is null)
         {
             return NotFound();
@@ -723,7 +728,7 @@ public class ImageController : BaseJellyfinApiController
         [FromQuery] string? foregroundLayer,
         [FromRoute, Required] int imageIndex)
     {
-        var item = _libraryManager.GetItemById<BaseItem>(itemId, User.GetUserId());
+        var item = GetItem(itemId);
         if (item is null)
         {
             return NotFound();

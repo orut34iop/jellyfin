@@ -33,20 +33,32 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
     public IReadOnlyList<PersonInfo> GetPeople(InternalPeopleQuery filter)
     {
         using var context = _dbProvider.CreateDbContext();
-        var dbQuery = TranslateQuery(context.Peoples.AsNoTracking(), context, filter);
 
-        // Include PeopleBaseItemMap
+        // Item-scoped lookups are used while building every item DTO. Start at the
+        // mapping table so SQLite can use its ItemId index instead of scanning the
+        // entire Peoples table and running correlated mapping subqueries per row.
         if (!filter.ItemId.IsEmpty())
         {
-            dbQuery = dbQuery.Include(p => p.BaseItems!.Where(m => m.ItemId == filter.ItemId))
-                .OrderBy(e => e.BaseItems!.First(e => e.ItemId == filter.ItemId).ListOrder)
-                .ThenBy(e => e.PersonType)
-                .ThenBy(e => e.Name);
+            IQueryable<PeopleBaseItemMap> itemPeopleQuery = TranslateItemQuery(
+                    context.PeopleBaseItemMap.AsNoTracking().Where(e => e.ItemId == filter.ItemId),
+                    context,
+                    filter)
+                .Include(e => e.People)
+                .OrderBy(e => e.ListOrder)
+                .ThenBy(e => e.People.PersonType)
+                .ThenBy(e => e.People.Name);
+
+            if (filter.Limit > 0)
+            {
+                itemPeopleQuery = itemPeopleQuery.Take(filter.Limit);
+            }
+
+            return itemPeopleQuery.AsEnumerable().Select(Map).ToArray();
         }
-        else
-        {
-            dbQuery = dbQuery.OrderBy(e => e.Name);
-        }
+
+        var dbQuery = TranslateQuery(context.Peoples.AsNoTracking(), context, filter);
+
+        dbQuery = dbQuery.OrderBy(e => e.Name);
 
         if (filter.Limit > 0)
         {
@@ -163,6 +175,24 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
     private static string GetMapKey(PeopleBaseItemMap map)
         => map.People.Name + "-" + map.People.PersonType + "-" + map.Role;
 
+    private static PersonInfo Map(PeopleBaseItemMap mapping)
+    {
+        var personInfo = new PersonInfo()
+        {
+            Id = mapping.People.Id,
+            ItemId = mapping.ItemId,
+            Name = mapping.People.Name,
+            Role = mapping.Role,
+            SortOrder = mapping.SortOrder
+        };
+        if (Enum.TryParse<PersonKind>(mapping.People.PersonType, out var kind))
+        {
+            personInfo.Type = kind;
+        }
+
+        return personInfo;
+    }
+
     private PersonInfo Map(People people)
     {
         var mapping = people.BaseItems?.FirstOrDefault();
@@ -227,7 +257,7 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
 
         if (queryExcludePersonTypes.Count > 0)
         {
-            query = query.Where(e => !queryPersonTypes.Contains(e.PersonType));
+            query = query.Where(e => !queryExcludePersonTypes.Contains(e.PersonType));
         }
 
         if (filter.MaxListOrder.HasValue && !filter.ItemId.IsEmpty())
@@ -239,6 +269,52 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
         {
             var nameContainsUpper = filter.NameContains.ToUpper();
             query = query.Where(e => e.Name.ToUpper().Contains(nameContainsUpper));
+        }
+
+        return query;
+    }
+
+    private IQueryable<PeopleBaseItemMap> TranslateItemQuery(
+        IQueryable<PeopleBaseItemMap> query,
+        JellyfinDbContext context,
+        InternalPeopleQuery filter)
+    {
+        if (filter.User is not null && filter.IsFavorite.HasValue)
+        {
+            var personType = itemTypeLookup.BaseItemKindNames[BaseItemKind.Person];
+            query = query.Where(mapping => context.UserData.Any(userData =>
+                userData.Item!.Type == personType
+                && userData.IsFavorite == filter.IsFavorite
+                && userData.UserId.Equals(filter.User.Id)
+                && userData.Item.Name == mapping.People.Name));
+        }
+
+        if (!filter.AppearsInItemId.IsEmpty())
+        {
+            query = query.Where(e => e.People.BaseItems!.Any(w => w.ItemId.Equals(filter.AppearsInItemId)));
+        }
+
+        var queryPersonTypes = filter.PersonTypes.Where(IsValidPersonType).ToList();
+        if (queryPersonTypes.Count > 0)
+        {
+            query = query.Where(e => queryPersonTypes.Contains(e.People.PersonType));
+        }
+
+        var queryExcludePersonTypes = filter.ExcludePersonTypes.Where(IsValidPersonType).ToList();
+        if (queryExcludePersonTypes.Count > 0)
+        {
+            query = query.Where(e => !queryExcludePersonTypes.Contains(e.People.PersonType));
+        }
+
+        if (filter.MaxListOrder.HasValue)
+        {
+            query = query.Where(e => e.ListOrder <= filter.MaxListOrder.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.NameContains))
+        {
+            var nameContainsUpper = filter.NameContains.ToUpper();
+            query = query.Where(e => e.People.Name.ToUpper().Contains(nameContainsUpper));
         }
 
         return query;
