@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Jellyfin 官方演进与 Folk release-10.11.z 对比报告</title>
+  <style>
+    :root{--ink:#172033;--muted:#61708a;--line:#dce3ee;--brand:#4f46e5;--brand2:#eef2ff;--good:#087f5b;--goodbg:#e8f7f1;--warn:#9a6700;--warnbg:#fff8df;--risk:#b42318;--riskbg:#fff0ef;--bg:#f6f8fc}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",Arial,sans-serif;line-height:1.65}
+    .wrap{max-width:1180px;margin:0 auto;padding:36px 28px 72px}.hero{background:linear-gradient(135deg,#18234b,#4f46e5);color:#fff;border-radius:20px;padding:42px 46px;box-shadow:0 18px 40px #27346b26}.eyebrow{letter-spacing:.12em;text-transform:uppercase;font-size:12px;opacity:.78}.hero h1{font-size:34px;line-height:1.25;margin:12px 0}.hero p{max-width:850px;margin:10px 0 0;color:#e6e9ff}.meta{display:flex;gap:12px;flex-wrap:wrap;margin-top:24px}.pill{display:inline-block;border:1px solid #ffffff55;border-radius:999px;padding:5px 12px;font-size:13px;color:#fff}
+    h2{font-size:24px;margin:40px 0 14px}h3{font-size:18px;margin:25px 0 8px}.lead{font-size:18px}.card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:22px 24px;margin:16px 0;box-shadow:0 6px 18px #2538580a}.decision{border-left:5px solid var(--brand);background:var(--brand2)}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.metric{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px}.metric strong{display:block;font-size:28px;color:var(--brand)}.metric span{color:var(--muted);font-size:13px}table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:14px}th,td{padding:12px 13px;border-bottom:1px solid var(--line);vertical-align:top;text-align:left}th{background:#f0f3fa;font-weight:700}tr:last-child td{border-bottom:0}.tag{display:inline-block;border-radius:6px;padding:2px 8px;font-size:12px;font-weight:700;white-space:nowrap}.merge{background:var(--goodbg);color:var(--good)}.review{background:var(--warnbg);color:var(--warn)}.hold{background:var(--riskbg);color:var(--risk)}code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.92em;background:#f1f3f7;padding:2px 5px;border-radius:4px}a{color:#364fc7;text-decoration:none}a:hover{text-decoration:underline}.small{font-size:13px;color:var(--muted)}ul{padding-left:22px}.callout{padding:14px 16px;border-radius:10px;background:#f7f8fb;border:1px solid var(--line);margin:12px 0}.footer{border-top:1px solid var(--line);margin-top:44px;padding-top:18px;color:var(--muted);font-size:13px}@media(max-width:800px){.wrap{padding:18px 14px 50px}.hero{padding:28px 24px}.hero h1{font-size:27px}.grid{grid-template-columns:1fr}table{display:block;overflow-x:auto;white-space:normal}}
+  </style>
+</head>
+<body>
+<main class="wrap">
+  <header class="hero">
+    <div class="eyebrow">Evolution tracking · decision support</div>
+    <h1>Jellyfin 官方演进与 Folk <code>release-10.11.z</code> 对比分析</h1>
+    <p>面向升级决策与特性归并的代码级调查报告。范围覆盖本地 Folk 分支、官方 10.11.11 稳定线、官方 12.0 RC2 以及截至报告日的官方 master。</p>
+    <div class="meta"><span class="pill">报告日期：2026-07-10</span><span class="pill">本地 HEAD：624f390d8c</span><span class="pill">官方 master：53aafcd38e</span><span class="pill">结论：分阶段演进</span></div>
+  </header>
+
+  <section>
+    <h2>一、执行摘要</h2>
+    <div class="card decision lead"><strong>建议：</strong>当前不建议直接把 Folk 分支整体升级到官方 12.0 RC2 或直接追 master。应保留现有 10.11 系定制，先选择性吸收官方安全、数据一致性、性能和播放修复；待 Moonfin 播放链路、数据库迁移、插件生态和多版本媒体模型完成回归后，再以 12.x 稳定版为目标做一次受控的大版本迁移。</div>
+    <div class="grid">
+      <div class="metric"><strong>10.11.11</strong><span>官方最新稳定版本（2026-06-06）</span></div>
+      <div class="metric"><strong>12.0-rc2</strong><span>官方最新预览版本（2026-06-28）</span></div>
+      <div class="metric"><strong>1430 / 904</strong><span>本地 HEAD 到官方 master 的提交差距 / 变更文件量级（git 统计）</span></div>
+    </div>
+    <div class="card"><strong>最值得吸收的官方演进：</strong>多版本媒体（alternate versions）感知的播放、继续观看与 Next Up；扫描期间降低重型数据库任务；大批量删除避免 SQLite SQL 变量上限；插件包名安全校验；丢失 WebSocket 后清理 SyncPlay 会话；以及官方对符号链接播放、VobSub 字幕、Live TV 和媒体流状态的修复。</div>
+    <div class="card"><strong>当前 Folk 的核心增量：</strong>Moonfin 同机本地文件直播放、仅本地元数据导入、默认悲观 SQLite 锁、重解析点媒体返回、库扫描期间 API 卡顿修复与请求诊断。这些不是官方 10.11.11 的内容，且与官方“仅在播放时解析符号链接”的方向存在交集，不能通过简单覆盖文件合并。</div>
+  </section>
+
+  <section>
+    <h2>二、基线与调查方法</h2>
+    <div class="card">
+      <ul>
+        <li>本地分支：<code>release-10.11.z</code>，HEAD 为 <code>624f390d8c</code>，提交时间 2026-07-10；其祖先包含官方 <code>v10.11.11</code>，并在其上叠加 Folk/Moonfin 定制。</li>
+        <li>官方稳定基线：<a href="https://github.com/jellyfin/jellyfin/releases/tag/v10.11.11">v10.11.11</a>；官方说明该版本为 bugfix release。</li>
+        <li>官方预览基线：<a href="https://github.com/jellyfin/jellyfin/releases/tag/v12.0-rc2">v12.0-rc2</a>；官方明确要求升级前处于 10.10.7+ 或 10.11.x，并提示首次启动会执行迁移、外部插件可能需要停用并改用 unstable 仓库。</li>
+        <li>官方开发基线：<code>upstream/master</code>，HEAD 为 <code>53aafcd38e</code>，最后提交日期 2026-07-07。Git 本地对比显示相对 Folk HEAD 有约 904 个变更文件，不能视为小版本补丁。</li>
+        <li>重点依据：提交主题、代码路径、测试变更、官方 release notes 与 GitHub compare；翻译和依赖机械更新未纳入功能优先级。</li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <h2>三、官方新增特性与重要 Bugfix</h2>
+    <table>
+      <thead><tr><th style="width:17%">领域</th><th style="width:28%">官方演进</th><th style="width:34%">对 Folk 的影响</th><th style="width:13%">建议</th><th>证据</th></tr></thead>
+      <tbody>
+        <tr><td>多版本媒体</td><td>把 alternate versions 纳入播放跟踪、Resume、Continue Watching、Next Up、版本计数、权限和 extras 聚合。</td><td>会改变媒体源分组、播放进度归属、列表结果和默认媒体源选择。Folk 的本地路径和 Moonfin 逻辑应在新模型上重新验证。</td><td><span class="tag review">重点评估</span></td><td><a href="https://github.com/jellyfin/jellyfin/commit/c242533f4e">c242533f4e</a> · <a href="https://github.com/jellyfin/jellyfin/commit/4725722b1c">4725722b1c</a> · <a href="https://github.com/jellyfin/jellyfin/commit/63990d6a2d">63990d6a2d</a></td></tr>
+        <tr><td>扫描与数据库性能</td><td>扫描运行时不执行重型 DB 任务；批量删除限制 SQL 变量数量；合并迁移中的重复清理改为批处理。</td><td>直接针对大库扫描、批量清理和 SQLite 压力。与 Folk 的“API 卡顿”和悲观锁改动高度相关，优先做基准测试后归并。</td><td><span class="tag merge">优先归并</span></td><td><a href="https://github.com/jellyfin/jellyfin/commit/1947296edd">1947296edd</a> · <a href="https://github.com/jellyfin/jellyfin/commit/069eb40ebf">069eb40ebf</a> · <a href="https://github.com/jellyfin/jellyfin/commit/af82aceadb">af82aceadb</a></td></tr>
+        <tr><td>播放与文件系统</td><td>只在播放时解析符号链接，避免常规扫描改变路径语义；修复 MediaSegments 多版本问题；改进 bitrate reporting。</td><td>与 Folk 的本地路径、reparse-point 和 Moonfin 播放链路有代码交集。应抽取共同路径策略，避免官方 symlink 规则被 Folk 的“直接下发路径”误伤。</td><td><span class="tag review">重点评估</span></td><td><a href="https://github.com/jellyfin/jellyfin/commit/c7111b7570">c7111b7570</a> · <a href="https://github.com/jellyfin/jellyfin/commit/59974490cc">59974490cc</a> · <a href="https://github.com/jellyfin/jellyfin/commit/d090c59939">d090c59939</a></td></tr>
+        <tr><td>字幕与媒体格式</td><td>新增 VobSub 字幕流支持；修复音频采样率被错误强制为 48 kHz、字幕缓存和字幕替换刷新问题。</td><td>对本地媒体兼容性和转码质量有实际收益，风险集中在 FFmpeg/SubtitleEdit 版本与客户端字幕能力。</td><td><span class="tag merge">可归并</span></td><td><a href="https://github.com/jellyfin/jellyfin/commit/6f0ff89bdc">6f0ff89bdc</a> · <a href="https://github.com/jellyfin/jellyfin/commit/e4383493a9">e4383493a9</a> · <a href="https://github.com/jellyfin/jellyfin/commit/efb0336369">efb0336369</a></td></tr>
+        <tr><td>安全与权限</td><td>拒绝不安全的插件包名；更多 API 强制 parental filtering；重新默认禁用 legacy authorization methods；修复无效 GUID 防护。</td><td>属于低争议、高收益的安全/权限修复。需要检查 Folk 是否有插件安装器或自定义 API 分支。</td><td><span class="tag merge">优先归并</span></td><td><a href="https://github.com/jellyfin/jellyfin/commit/5104497331">5104497331</a> · <a href="https://github.com/jellyfin/jellyfin/commit/47f2b3b6d0">47f2b3b6d0</a> · <a href="https://github.com/jellyfin/jellyfin/commit/a9865367d8">a9865367d8</a></td></tr>
+        <tr><td>会话与 Live TV</td><td>丢失 WebSocket 后关闭会话以避免 zombie SyncPlay group；修复关闭 live stream 后 GetStreamingState 空引用；修复 tuner 不释放。</td><td>提升长时间运行实例稳定性，尤其适用于多端播放、SyncPlay 和 Live TV；不依赖 12.x 数据模型即可单独回归。</td><td><span class="tag merge">优先归并</span></td><td><a href="https://github.com/jellyfin/jellyfin/commit/8f3eb3205d">8f3eb3205d</a> · <a href="https://github.com/jellyfin/jellyfin/commit/8ffb54603a">8ffb54603a</a> · <a href="https://github.com/jellyfin/jellyfin/commit/e26f4a1005">e26f4a1005</a></td></tr>
+        <tr><td>库与元数据</td><td>删除库路径后清除 ghost entries；修复人名/演员查询、TMDB creators、episode air date、Identify 结果、父母评级多值解析等。</td><td>会影响重新扫描、删除目录、人物页和电视节目元数据一致性；适合随官方提交逐项回归，不建议整段 cherry-pick 大范围库重构。</td><td><span class="tag merge">选择性归并</span></td><td><a href="https://github.com/jellyfin/jellyfin/commit/43a152359e">43a152359e</a> · <a href="https://github.com/jellyfin/jellyfin/commit/2528bc1032">2528bc1032</a> · <a href="https://github.com/jellyfin/jellyfin/commit/5036bf7db0">5036bf7db0</a></td></tr>
+        <tr><td>启动与迁移 UX</td><td>重做启动界面、增加进度/活动日志；增加可取消 redirect handoff；迁移过程更可观测。</td><td>可降低升级期间的运维风险，但涉及 12.x 启动体验和迁移流程，适合在升级分支整体验证。</td><td><span class="tag review">随 12.x 评估</span></td><td><a href="https://github.com/jellyfin/jellyfin/commit/0046adda29">0046adda29</a> · <a href="https://github.com/jellyfin/jellyfin/commit/31070e8208">31070e8208</a></td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>四、Folk 当前分支的独有能力与归并边界</h2>
+    <table>
+      <thead><tr><th>Folk 提交/能力</th><th>价值</th><th>与官方主线的关系</th><th>建议</th></tr></thead>
+      <tbody>
+        <tr><td><a href="https://github.com/orut34iop/jellyfin/commit/62f1878db3">62f1878db3</a> / <a href="https://github.com/orut34iop/jellyfin/commit/d42b35dff8">d42b35dff8</a> / <a href="https://github.com/orut34iop/jellyfin/commit/0a0fb145a9">0a0fb145a9</a><br>Moonfin 同机本地文件直播放</td><td>同机客户端可直接打开库文件路径，绕过 Jellyfin HTTP/HLS 中转；并通过条件收窄、跳过 probe 降低误判。</td><td>官方有“只在播放时解析 symlink”修复，但没有 Folk 的 Moonfin 专用协议分支。两者都触及 MediaInfoController、路径解析和 MediaSource。</td><td><span class="tag hold">保留为 Folk 特性</span><br>建立独立 helper 与集成测试，待官方 12.x API 稳定后再适配。</td></tr>
+        <tr><td><a href="https://github.com/orut34iop/jellyfin/commit/788dd4b390">788dd4b390</a><br>仅本地元数据导入模式</td><td>减少远程元数据访问、避免不需要的 probe/媒体段抽取，适合本地 NFO 主导的大库导入。</td><td>官方主线没有同名完整能力；属于产品策略而非通用 bugfix，可能改变元数据完整性和刷新语义。</td><td><span class="tag hold">保留为 Folk 特性</span><br>继续以 feature flag/策略类隔离，补充关闭模式的数据一致性测试。</td></tr>
+        <tr><td><a href="https://github.com/orut34iop/jellyfin/commit/4a5be7fc90">4a5be7fc90</a><br>默认悲观 SQLite 锁</td><td>针对备份触发、扫描和并发写入时的锁冲突/死锁风险做防御。</td><td>官方 12.x 在扫描期间避免重型 DB 任务，方向不同但目标相同；锁策略本身可能影响吞吐和等待时间。</td><td><span class="tag review">基准后决定</span><br>对单用户、并发扫描、备份、插件写入分别测 P95/P99 延迟与 BUSY/locked。</td></tr>
+        <tr><td><a href="https://github.com/orut34iop/jellyfin/commit/9780b64c0e">9780b64c0e</a> / <a href="https://github.com/orut34iop/jellyfin/commit/624f390d8c">624f390d8c</a><br>库扫描期间 API 卡顿修复与诊断</td><td>降低 DTO/People 查询阻塞，并增加慢请求诊断，是当前运维可观测性的直接收益。</td><td>官方同步加入“扫描期间不跑重型 DB 任务”等优化；Folk 版本应作为验证样本，与官方实现做基准对比，不宜互相覆盖。</td><td><span class="tag merge">保留并对齐</span><br>优先对比官方实现，合并互补测试和指标。</td></tr>
+        <tr><td><a href="https://github.com/orut34iop/jellyfin/commit/89dc465327">89dc465327</a><br>reparse-point 媒体返回 stream result</td><td>改善符号链接/重解析点相关的流式返回行为。</td><td>与官方 symlink-on-playback 规则直接相邻，最容易出现行为冲突。</td><td><span class="tag review">重点回归</span><br>必须覆盖实际文件、Unix symlink、macOS reparse、Windows junction、Moonfin 和普通客户端。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>五、升级风险判断</h2>
+    <div class="card"><h3>1. 12.x 不是普通补丁升级</h3><p>官方 RC2 明确说明：首次启动会执行数分钟迁移；升级前需在 10.10.7+ 或 10.11.x；外部插件可能无法直接工作，应停用并改用官方 unstable 插件仓库。对当前 Folk 而言，还要增加“数据库备份可恢复、启动迁移可中断/重试、插件重新安装、Moonfin 直播放可用”四项门禁。</p></div>
+    <div class="card"><h3>2. 多版本媒体会触碰播放状态与客户端假设</h3><p>官方把播放进度、Resume、Continue Watching、Next Up 和 extras 都改成 version-aware。Moonfin 当前依赖 <code>Protocol = File</code> 加本地绝对路径直播放，必须验证媒体源选择、版本分组、播放进度回写和备用版本切换是否仍然满足客户端预期。</p></div>
+    <div class="card"><h3>3. Folk 的库/数据库改动与官方性能改动可能相互作用</h3><p>Folk 已修改 DTO、PeopleRepository、扫描策略和 SQLite 锁；官方也在扫描调度、查询投影、批量删除和库查询上持续改造。建议按功能切片重放，而不是把 master 与 Folk 分支做一次大 rebase 后凭编译通过即上线。</p></div>
+    <div class="card"><h3>4. 不能把官方 master 当作稳定目标</h3><p>截至报告日官方最新公开预览是 12.0-rc2，master 仍在继续变动。master 的新增提交适合作为候选修复池，不适合作为生产升级基线。生产决策应等待 12.x 稳定版，或只回移明确、局部、可测试的修复。</p></div>
+  </section>
+
+  <section>
+    <h2>六、建议的归并清单</h2>
+    <table>
+      <thead><tr><th>优先级</th><th>行动</th><th>实施方式</th><th>验收条件</th></tr></thead>
+      <tbody>
+        <tr><td><span class="tag merge">P0</span></td><td>安全与会话稳定性</td><td>优先回移插件包名校验、parental filtering、legacy auth 默认禁用、SyncPlay zombie session、Live TV tuner/closed stream 修复。</td><td>现有 API/插件/Live TV/SyncPlay 回归通过；无 Folk 定制路径冲突。</td></tr>
+        <tr><td><span class="tag merge">P0</span></td><td>扫描与 SQLite 性能修复</td><td>以官方“扫描期间跳过重型 DB 任务”和大批量删除修复为主线，对照 Folk 的 API 卡顿诊断与悲观锁实现逐项合并。</td><td>大库扫描期间 API P95/P99、locked/busy 次数和备份成功率不回退。</td></tr>
+        <tr><td><span class="tag merge">P1</span></td><td>字幕、symlink、媒体流修复</td><td>回移 VobSub、采样率、字幕缓存等独立修复；symlink 与 reparse-point 相关变更必须手工整合。</td><td>普通客户端、Moonfin、本地文件、网络挂载、真实 symlink/junction 播放矩阵通过。</td></tr>
+        <tr><td><span class="tag review">P1</span></td><td>多版本媒体模型</td><td>建立独立实验分支，先吸收官方 version-aware 变更，再迁移 Moonfin helper；不要直接 cherry-pick 单一提交。</td><td>版本计数、权限、Resume、Continue Watching、Next Up、extras、默认媒体源和播放进度全部正确。</td></tr>
+        <tr><td><span class="tag hold">P2</span></td><td>仅本地元数据与 Moonfin 直播放</td><td>继续保持 Folk 独立模块/策略，明确 feature flag 和客户端契约；必要时向官方提交通用化提案，而不是把 Moonfin 名称写入通用路径。</td><td>关闭特性后行为等同官方；开启特性时有端到端日志和自动化测试。</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>七、推荐迁移路线</h2>
+    <div class="card"><ol>
+      <li><strong>冻结现状：</strong>为当前 Folk HEAD 做完整数据库、插件、配置和媒体路径备份，记录 Moonfin 的 <code>directPlay</code> 与 <code>isLocalFilePath</code> 诊断。</li>
+      <li><strong>先做 10.11 系增量：</strong>优先归并 P0/P1 的局部修复；每批只改变一个主题，并保留 Folk 现有测试。</li>
+      <li><strong>建立 12.x 迁移分支：</strong>以官方 12.0 RC2/后续稳定版为基线，先跑迁移与插件矩阵，再迁移 Moonfin、local-metadata-only 和 SQLite 锁策略。</li>
+      <li><strong>做数据和播放回归：</strong>重点覆盖大库扫描、备份、恢复、符号链接、多个版本、字幕、Live TV、SyncPlay、普通客户端及 Moonfin。</li>
+      <li><strong>上线门禁：</strong>只有当迁移可恢复、API 卡顿指标不恶化、Moonfin 仍然直放、插件可用且无数据丢失时，才从测试预览转生产。</li>
+    </ol></div>
+  </section>
+
+  <section>
+    <h2>八、参考来源</h2>
+    <div class="card small">
+      <p><a href="https://github.com/jellyfin/jellyfin/releases/tag/v10.11.11">官方 v10.11.11 release notes</a> · <a href="https://github.com/jellyfin/jellyfin/releases/tag/v12.0-rc2">官方 v12.0 RC2 release notes</a> · <a href="https://github.com/jellyfin/jellyfin/compare/v10.11.11...master">官方 v10.11.11 与 master compare</a> · <a href="https://github.com/jellyfin/jellyfin">官方 Jellyfin 仓库</a></p>
+      <p>本地证据来自仓库提交历史与工作区：<code>git log</code>、<code>git diff --stat</code>、官方 remote <code>upstream</code>。报告只将提交主题和代码路径作为事实依据；“风险/建议”属于基于这些证据的工程判断。</p>
+    </div>
+  </section>
+
+  <footer class="footer">生成于 /Users/wiz/dev/jellyfin · 文件用途：升级评审、特性归并和回归测试规划 · 状态：调查报告，不代表已执行升级</footer>
+</main>
+</body>
+</html>
