@@ -1,13 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Text;
 using MediaBrowser.Model.Dlna;
-using MediaBrowser.Model.Dto;
-using MediaBrowser.Model.Entities;
-using MediaBrowser.Model.MediaInfo;
-using MediaBrowser.Model.Session;
-using Moq;
 using Xunit;
 
 namespace Jellyfin.Model.Tests.Dlna;
@@ -16,52 +10,6 @@ public class StreamInfoTests
 {
     private const string BaseUrl = "/test/";
     private const int RandomSeed = 298347823;
-
-    [Fact]
-    public void GetSubtitleProfiles_ExternalSubtitleUrl_IncludesPlaySessionId()
-    {
-        var itemId = Guid.NewGuid();
-        var streamInfo = new StreamInfo
-        {
-            DeviceProfile = new DeviceProfile
-            {
-                SubtitleProfiles =
-                [
-                    new SubtitleProfile
-                    {
-                        Format = "srt",
-                        Method = SubtitleDeliveryMethod.External
-                    }
-                ]
-            },
-            ItemId = itemId,
-            MediaSource = new MediaSourceInfo
-            {
-                Id = "media-source-id",
-                Protocol = MediaProtocol.File,
-                MediaStreams =
-                [
-                    new MediaStream
-                    {
-                        Type = MediaStreamType.Subtitle,
-                        Index = 2,
-                        Codec = "srt",
-                        IsExternal = false
-                    }
-                ]
-            },
-            PlayMethod = PlayMethod.DirectPlay,
-            PlaySessionId = "play session/id"
-        };
-        var transcoderSupport = new Mock<ITranscoderSupport>();
-        transcoderSupport.Setup(support => support.CanExtractSubtitles("srt")).Returns(true);
-
-        var subtitleProfile = Assert.Single(streamInfo.GetSubtitleProfiles(transcoderSupport.Object, false, "/base", "access-token"));
-
-        Assert.Equal(
-            $"/base/Videos/{itemId}/media-source-id/Subtitles/2/0/Stream.srt?PlaySessionId=play%20session%2Fid&ApiKey=access-token",
-            subtitleProfile.Url);
-    }
 
     /// <summary>
     /// Returns a random float.

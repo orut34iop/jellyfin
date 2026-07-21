@@ -33,7 +33,6 @@ public class PlaystateController : BaseJellyfinApiController
     private readonly ISessionManager _sessionManager;
     private readonly ILogger<PlaystateController> _logger;
     private readonly ITranscodeManager _transcodeManager;
-    private readonly ISubtitleEncoder _subtitleEncoder;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PlaystateController"/> class.
@@ -44,15 +43,13 @@ public class PlaystateController : BaseJellyfinApiController
     /// <param name="sessionManager">Instance of the <see cref="ISessionManager"/> interface.</param>
     /// <param name="loggerFactory">Instance of the <see cref="ILoggerFactory"/> interface.</param>
     /// <param name="transcodeManager">Instance of the <see cref="ITranscodeManager"/> interface.</param>
-    /// <param name="subtitleEncoder">Instance of the <see cref="ISubtitleEncoder"/> interface.</param>
     public PlaystateController(
         IUserManager userManager,
         IUserDataManager userDataRepository,
         ILibraryManager libraryManager,
         ISessionManager sessionManager,
         ILoggerFactory loggerFactory,
-        ITranscodeManager transcodeManager,
-        ISubtitleEncoder subtitleEncoder)
+        ITranscodeManager transcodeManager)
     {
         _userManager = userManager;
         _userDataRepository = userDataRepository;
@@ -61,7 +58,6 @@ public class PlaystateController : BaseJellyfinApiController
         _logger = loggerFactory.CreateLogger<PlaystateController>();
 
         _transcodeManager = transcodeManager;
-        _subtitleEncoder = subtitleEncoder;
     }
 
     /// <summary>
@@ -253,7 +249,6 @@ public class PlaystateController : BaseJellyfinApiController
         _logger.LogDebug("ReportPlaybackStopped PlaySessionId: {0}", playbackStopInfo.PlaySessionId ?? string.Empty);
         if (!string.IsNullOrWhiteSpace(playbackStopInfo.PlaySessionId))
         {
-            _subtitleEncoder.CancelSubtitleExtraction(playbackStopInfo.PlaySessionId);
             await _transcodeManager.KillTranscodingJobs(User.GetDeviceId()!, playbackStopInfo.PlaySessionId, s => true).ConfigureAwait(false);
         }
 
@@ -467,7 +462,6 @@ public class PlaystateController : BaseJellyfinApiController
         _logger.LogDebug("ReportPlaybackStopped PlaySessionId: {0}", playbackStopInfo.PlaySessionId ?? string.Empty);
         if (!string.IsNullOrWhiteSpace(playbackStopInfo.PlaySessionId))
         {
-            _subtitleEncoder.CancelSubtitleExtraction(playbackStopInfo.PlaySessionId);
             await _transcodeManager.KillTranscodingJobs(User.GetDeviceId()!, playbackStopInfo.PlaySessionId, s => true).ConfigureAwait(false);
         }
 

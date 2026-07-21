@@ -40,7 +40,6 @@ namespace MediaBrowser.MediaEncoding.Subtitles
         private readonly IMediaSourceManager _mediaSourceManager;
         private readonly ISubtitleParser _subtitleParser;
         private readonly IPathManager _pathManager;
-        private readonly SubtitleExtractionSessionManager _subtitleExtractionSessionManager = new();
 
         /// <summary>
         /// The _semaphoreLocks.
@@ -124,7 +123,7 @@ namespace MediaBrowser.MediaEncoding.Subtitles
             }
         }
 
-        async Task<Stream> ISubtitleEncoder.GetSubtitles(BaseItem item, string mediaSourceId, int subtitleStreamIndex, string outputFormat, long startTimeTicks, long endTimeTicks, bool preserveOriginalTimestamps, string? playSessionId, CancellationToken cancellationToken)
+        async Task<Stream> ISubtitleEncoder.GetSubtitles(BaseItem item, string mediaSourceId, int subtitleStreamIndex, string outputFormat, long startTimeTicks, long endTimeTicks, bool preserveOriginalTimestamps, CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(item);
 
@@ -132,9 +131,6 @@ namespace MediaBrowser.MediaEncoding.Subtitles
             {
                 throw new ArgumentNullException(nameof(mediaSourceId));
             }
-
-            using var sessionRegistration = _subtitleExtractionSessionManager.Register(playSessionId, cancellationToken);
-            cancellationToken = sessionRegistration.CancellationToken;
 
             var mediaSources = await _mediaSourceManager.GetPlaybackMediaSources(item, null, true, false, cancellationToken).ConfigureAwait(false);
 
@@ -158,13 +154,6 @@ namespace MediaBrowser.MediaEncoding.Subtitles
             {
                 return ConvertSubtitles(stream, inputFormat, outputFormat, startTimeTicks, endTimeTicks, preserveOriginalTimestamps, cancellationToken);
             }
-        }
-
-        /// <inheritdoc />
-        public void CancelSubtitleExtraction(string playSessionId)
-        {
-            _logger.LogDebug("Canceling subtitle extraction for PlaySessionId {PlaySessionId}", playSessionId);
-            _subtitleExtractionSessionManager.Cancel(playSessionId);
         }
 
         private async Task<(Stream Stream, string Format)> GetSubtitleStream(
@@ -1089,7 +1078,6 @@ namespace MediaBrowser.MediaEncoding.Subtitles
         /// <inheritdoc />
         public void Dispose()
         {
-            _subtitleExtractionSessionManager.Dispose();
             _semaphoreLocks.Dispose();
         }
 
