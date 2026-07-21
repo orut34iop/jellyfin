@@ -486,7 +486,7 @@ public class SubtitleController : BaseJellyfinApiController
             startPositionTicks,
             endPositionTicks ?? 0,
             copyTimestamps,
-            HttpContext.RequestAborted);
+            CancellationToken.None);
     }
 
     /// <summary>

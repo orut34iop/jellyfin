@@ -1,5 +1,3 @@
-using System;
-using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using AutoFixture;
@@ -104,39 +102,6 @@ namespace Jellyfin.MediaEncoding.Subtitles.Tests
             Assert.Equal(subtitleInfo.Protocol, result.Protocol);
             Assert.Equal(subtitleInfo.Format, result.Format);
             Assert.Equal(subtitleInfo.IsExternal, result.IsExternal);
-        }
-
-        [Fact]
-        public async Task WaitForSubtitleProcessExitAsync_RequestCancelled_KillsProcess()
-        {
-            using var process = new Process
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = OperatingSystem.IsWindows() ? "ping.exe" : "/bin/sleep",
-                    UseShellExecute = false
-                }
-            };
-
-            if (OperatingSystem.IsWindows())
-            {
-                process.StartInfo.ArgumentList.Add("-n");
-                process.StartInfo.ArgumentList.Add("31");
-                process.StartInfo.ArgumentList.Add("127.0.0.1");
-            }
-            else
-            {
-                process.StartInfo.ArgumentList.Add("30");
-            }
-
-            process.Start();
-            using var cancellationTokenSource = new CancellationTokenSource();
-
-            var waitTask = SubtitleEncoder.WaitForSubtitleProcessExitAsync(process, cancellationTokenSource.Token);
-            await cancellationTokenSource.CancelAsync();
-
-            await Assert.ThrowsAsync<OperationCanceledException>(() => waitTask);
-            Assert.True(process.HasExited);
         }
     }
 }

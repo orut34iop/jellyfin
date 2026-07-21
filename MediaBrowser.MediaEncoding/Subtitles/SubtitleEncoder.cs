@@ -31,8 +31,6 @@ namespace MediaBrowser.MediaEncoding.Subtitles
 {
     public sealed class SubtitleEncoder : ISubtitleEncoder, IDisposable
     {
-        internal static readonly TimeSpan SubtitleExtractionTimeout = TimeSpan.FromMinutes(30);
-
         private readonly ILogger<SubtitleEncoder> _logger;
         private readonly IFileSystem _fileSystem;
         private readonly IMediaEncoder _mediaEncoder;
@@ -397,12 +395,13 @@ namespace MediaBrowser.MediaEncoding.Subtitles
 
                 try
                 {
-                    exitCode = await WaitForSubtitleProcessExitAsync(process, cancellationToken).ConfigureAwait(false);
+                    await process.WaitForExitAsync(TimeSpan.FromMinutes(30)).ConfigureAwait(false);
+                    exitCode = process.ExitCode;
                 }
                 catch (OperationCanceledException)
                 {
-                    DeleteSubtitleFile(outputPath, "converted");
-                    throw;
+                    process.Kill(true);
+                    exitCode = -1;
                 }
             }
 
@@ -529,10 +528,6 @@ namespace MediaBrowser.MediaEncoding.Subtitles
                     await ExtractAllExtractableSubtitlesInternal(mediaSource, extractableStreams, cancellationToken).ConfigureAwait(false);
                     await ExtractAllExtractableSubtitlesMKS(mediaSource, extractableStreams, cancellationToken).ConfigureAwait(false);
                 }
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
             }
             catch (Exception ex)
             {
@@ -696,16 +691,13 @@ namespace MediaBrowser.MediaEncoding.Subtitles
 
                 try
                 {
-                    exitCode = await WaitForSubtitleProcessExitAsync(process, cancellationToken).ConfigureAwait(false);
+                    await process.WaitForExitAsync(TimeSpan.FromMinutes(30)).ConfigureAwait(false);
+                    exitCode = process.ExitCode;
                 }
                 catch (OperationCanceledException)
                 {
-                    foreach (var outputPath in outputPaths)
-                    {
-                        DeleteSubtitleFile(outputPath, "extracted");
-                    }
-
-                    throw;
+                    process.Kill(true);
+                    exitCode = -1;
                 }
             }
 
@@ -864,12 +856,13 @@ namespace MediaBrowser.MediaEncoding.Subtitles
 
                 try
                 {
-                    exitCode = await WaitForSubtitleProcessExitAsync(process, cancellationToken).ConfigureAwait(false);
+                    await process.WaitForExitAsync(TimeSpan.FromMinutes(30)).ConfigureAwait(false);
+                    exitCode = process.ExitCode;
                 }
                 catch (OperationCanceledException)
                 {
-                    DeleteSubtitleFile(outputPath, "extracted");
-                    throw;
+                    process.Kill(true);
+                    exitCode = -1;
                 }
             }
 
@@ -923,54 +916,6 @@ namespace MediaBrowser.MediaEncoding.Subtitles
             if (string.Equals(outputCodec, "ass", StringComparison.OrdinalIgnoreCase))
             {
                 await SetAssFont(outputPath, cancellationToken).ConfigureAwait(false);
-            }
-        }
-
-        internal static async Task<int> WaitForSubtitleProcessExitAsync(Process process, CancellationToken cancellationToken)
-        {
-            using var timeoutCancellationTokenSource = new CancellationTokenSource(SubtitleExtractionTimeout);
-            using var linkedCancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(
-                cancellationToken,
-                timeoutCancellationTokenSource.Token);
-
-            try
-            {
-                await process.WaitForExitAsync(linkedCancellationTokenSource.Token).ConfigureAwait(false);
-                return process.ExitCode;
-            }
-            catch (OperationCanceledException)
-            {
-                try
-                {
-                    if (!process.HasExited)
-                    {
-                        process.Kill(entireProcessTree: true);
-                    }
-                }
-                catch (InvalidOperationException)
-                {
-                    // The process exited between checking HasExited and calling Kill.
-                }
-
-                await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
-                cancellationToken.ThrowIfCancellationRequested();
-                return -1;
-            }
-        }
-
-        private void DeleteSubtitleFile(string path, string operation)
-        {
-            try
-            {
-                _logger.LogWarning("Deleting {Operation} subtitle due to cancellation: {Path}", operation, path);
-                _fileSystem.DeleteFile(path);
-            }
-            catch (FileNotFoundException)
-            {
-            }
-            catch (IOException ex)
-            {
-                _logger.LogError(ex, "Error deleting {Operation} subtitle {Path}", operation, path);
             }
         }
 
