@@ -203,6 +203,7 @@ public class SubtitleController : BaseJellyfinApiController
     /// <param name="copyTimestamps">Optional. Whether to copy the timestamps.</param>
     /// <param name="addVttTimeMap">Optional. Whether to add a VTT time map.</param>
     /// <param name="startPositionTicks">The start position of the subtitle in ticks.</param>
+    /// <param name="playSessionId">The playback session identifier.</param>
     /// <response code="200">File returned.</response>
     /// <returns>A <see cref="FileContentResult"/> with the subtitle file.</returns>
     [HttpGet("Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/Stream.{routeFormat}")]
@@ -220,7 +221,8 @@ public class SubtitleController : BaseJellyfinApiController
         [FromQuery] long? endPositionTicks,
         [FromQuery] bool copyTimestamps = false,
         [FromQuery] bool addVttTimeMap = false,
-        [FromQuery] long startPositionTicks = 0)
+        [FromQuery] long startPositionTicks = 0,
+        [FromQuery] string? playSessionId = null)
     {
         // Set parameters to route value if not provided via query.
         itemId ??= routeItemId;
@@ -249,7 +251,7 @@ public class SubtitleController : BaseJellyfinApiController
 
         if (string.Equals(format, "vtt", StringComparison.OrdinalIgnoreCase) && addVttTimeMap)
         {
-            Stream stream = await EncodeSubtitles(itemId.Value, mediaSourceId, index.Value, format, startPositionTicks, endPositionTicks, copyTimestamps).ConfigureAwait(false);
+            Stream stream = await EncodeSubtitles(itemId.Value, mediaSourceId, index.Value, format, startPositionTicks, endPositionTicks, copyTimestamps, playSessionId).ConfigureAwait(false);
             await using (stream.ConfigureAwait(false))
             {
                 using var reader = new StreamReader(stream);
@@ -270,7 +272,8 @@ public class SubtitleController : BaseJellyfinApiController
                 format,
                 startPositionTicks,
                 endPositionTicks,
-                copyTimestamps).ConfigureAwait(false),
+                copyTimestamps,
+                playSessionId).ConfigureAwait(false),
             MimeTypes.GetMimeType("file." + format));
     }
 
@@ -290,6 +293,7 @@ public class SubtitleController : BaseJellyfinApiController
     /// <param name="endPositionTicks">Optional. The end position of the subtitle in ticks.</param>
     /// <param name="copyTimestamps">Optional. Whether to copy the timestamps.</param>
     /// <param name="addVttTimeMap">Optional. Whether to add a VTT time map.</param>
+    /// <param name="playSessionId">The playback session identifier.</param>
     /// <response code="200">File returned.</response>
     /// <returns>A <see cref="FileContentResult"/> with the subtitle file.</returns>
     [HttpGet("Videos/{routeItemId}/{routeMediaSourceId}/Subtitles/{routeIndex}/{routeStartPositionTicks}/Stream.{routeFormat}")]
@@ -308,7 +312,8 @@ public class SubtitleController : BaseJellyfinApiController
         [FromQuery, ParameterObsolete] string? format,
         [FromQuery] long? endPositionTicks,
         [FromQuery] bool copyTimestamps = false,
-        [FromQuery] bool addVttTimeMap = false)
+        [FromQuery] bool addVttTimeMap = false,
+        [FromQuery] string? playSessionId = null)
     {
         return GetSubtitle(
             routeItemId,
@@ -322,7 +327,8 @@ public class SubtitleController : BaseJellyfinApiController
             endPositionTicks,
             copyTimestamps,
             addVttTimeMap,
-            startPositionTicks ?? routeStartPositionTicks);
+            startPositionTicks ?? routeStartPositionTicks,
+            playSessionId);
     }
 
     /// <summary>
@@ -466,6 +472,7 @@ public class SubtitleController : BaseJellyfinApiController
     /// <param name="startPositionTicks">The start position in ticks.</param>
     /// <param name="endPositionTicks">The end position in ticks.</param>
     /// <param name="copyTimestamps">Whether to copy the timestamps.</param>
+    /// <param name="playSessionId">The playback session identifier.</param>
     /// <returns>A <see cref="Task{Stream}"/> with the new subtitle file.</returns>
     private Task<Stream> EncodeSubtitles(
         Guid id,
@@ -474,7 +481,8 @@ public class SubtitleController : BaseJellyfinApiController
         string format,
         long startPositionTicks,
         long? endPositionTicks,
-        bool copyTimestamps)
+        bool copyTimestamps,
+        string? playSessionId)
     {
         var item = _libraryManager.GetItemById<BaseItem>(id);
 
@@ -486,6 +494,7 @@ public class SubtitleController : BaseJellyfinApiController
             startPositionTicks,
             endPositionTicks ?? 0,
             copyTimestamps,
+            playSessionId,
             HttpContext.RequestAborted);
     }
 

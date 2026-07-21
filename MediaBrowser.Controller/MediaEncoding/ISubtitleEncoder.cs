@@ -23,6 +23,7 @@ namespace MediaBrowser.Controller.MediaEncoding
         /// <param name="startTimeTicks">Start time.</param>
         /// <param name="endTimeTicks">End time.</param>
         /// <param name="preserveOriginalTimestamps">Option to preserve original timestamps.</param>
+        /// <param name="playSessionId">The playback session identifier.</param>
         /// <param name="cancellationToken">The cancellation token for the operation.</param>
         /// <returns>Task{Stream}.</returns>
         Task<Stream> GetSubtitles(
@@ -33,7 +34,14 @@ namespace MediaBrowser.Controller.MediaEncoding
             long startTimeTicks,
             long endTimeTicks,
             bool preserveOriginalTimestamps,
+            string playSessionId,
             CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Cancels subtitle extraction associated with a playback session.
+        /// </summary>
+        /// <param name="playSessionId">The playback session identifier.</param>
+        void CancelSubtitleExtraction(string playSessionId);
 
         /// <summary>
         /// Gets the subtitle language encoding parameter.

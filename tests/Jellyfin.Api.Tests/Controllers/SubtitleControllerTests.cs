@@ -22,7 +22,7 @@ namespace Jellyfin.Api.Tests.Controllers;
 public class SubtitleControllerTests
 {
     [Fact]
-    public async Task GetSubtitle_PassesRequestAbortedTokenToEncoder()
+    public async Task GetSubtitle_PassesPlaybackSessionAndRequestAbortedTokenToEncoder()
     {
         var itemId = Guid.NewGuid();
         var item = new Movie { Id = itemId };
@@ -42,9 +42,10 @@ public class SubtitleControllerTests
                 0,
                 0,
                 false,
+                "play-session-id",
                 It.IsAny<CancellationToken>()))
-            .Callback<BaseItem, string, int, string, long, long, bool, CancellationToken>(
-                (_, _, _, _, _, _, _, cancellationToken) => receivedCancellationToken = cancellationToken)
+            .Callback<BaseItem, string, int, string, long, long, bool, string, CancellationToken>(
+                (_, _, _, _, _, _, _, _, cancellationToken) => receivedCancellationToken = cancellationToken)
             .ReturnsAsync(new MemoryStream([1]));
 
         var controller = new SubtitleController(
@@ -75,7 +76,8 @@ public class SubtitleControllerTests
             null,
             null,
             null,
-            null);
+            null,
+            playSessionId: "play-session-id");
 
         Assert.Equal(cancellationTokenSource.Token, receivedCancellationToken);
     }

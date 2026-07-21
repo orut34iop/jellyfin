@@ -1262,9 +1262,16 @@ public class StreamInfo
                     startPositionTicks.ToString(CultureInfo.InvariantCulture),
                     subtitleProfile.Format);
 
+                var querySeparator = '?';
+                if (!string.IsNullOrEmpty(PlaySessionId))
+                {
+                    info.Url += "?PlaySessionId=" + Uri.EscapeDataString(PlaySessionId);
+                    querySeparator = '&';
+                }
+
                 if (!string.IsNullOrEmpty(accessToken))
                 {
-                    info.Url += "?ApiKey=" + accessToken;
+                    info.Url += querySeparator + "ApiKey=" + accessToken;
                 }
 
                 info.IsExternalUrl = false;
