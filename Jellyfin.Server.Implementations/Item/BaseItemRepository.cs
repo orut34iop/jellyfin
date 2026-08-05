@@ -65,6 +65,7 @@ public sealed class BaseItemRepository
     /// so that we can de-serialize properly when we don't have strong types.
     /// </summary>
     private static readonly ConcurrentDictionary<string, Type?> _typeMap = new ConcurrentDictionary<string, Type?>();
+    private static readonly SemaphoreSlim ItemWriteSemaphore = new(1, 1);
     private readonly IDbContextFactory<JellyfinDbContext> _dbProvider;
     private readonly IServerApplicationHost _appHost;
     private readonly IItemTypeLookup _itemTypeLookup;
@@ -636,11 +637,13 @@ public sealed class BaseItemRepository
             tuples.Add((item, ancestorIds, topParent, userdataKey, inheritedTags));
         }
 
+        ItemWriteSemaphore.Wait(cancellationToken);
+        using var writeLease = new SemaphoreReleaser(ItemWriteSemaphore);
         using var context = _dbProvider.CreateDbContext();
         using var transaction = context.Database.BeginTransaction();
 
         var ids = tuples.Select(f => f.Item.Id).ToArray();
-        var existingItems = context.BaseItems.Where(e => ids.Contains(e.Id)).Select(f => f.Id).ToArray();
+        var existingItems = context.BaseItems.Where(e => ids.Contains(e.Id)).Select(f => f.Id).ToHashSet();
 
         foreach (var item in tuples)
         {
@@ -648,7 +651,7 @@ public sealed class BaseItemRepository
             // TODO: refactor this "inconsistency"
             entity.TopParentId = item.TopParent?.Id;
 
-            if (!existingItems.Any(e => e == entity.Id))
+            if (!existingItems.Contains(entity.Id))
             {
                 context.BaseItems.Add(entity);
             }
@@ -700,16 +703,22 @@ public sealed class BaseItemRepository
         context.ItemValues.AddRange(missingItemValues);
         context.SaveChanges();
 
-        var itemValuesStore = existingValues.Concat(missingItemValues).ToArray();
+        var itemValuesStore = existingValues
+            .Concat(missingItemValues)
+            .ToDictionary(e => (e.Type, e.Value));
         var valueMap = itemValueMaps
-            .Select(f => (f.Item, Values: f.Values.Select(e => itemValuesStore.First(g => g.Value == e.Value && g.Type == e.MagicNumber)).DistinctBy(e => e.ItemValueId).ToArray()))
+            .Select(f => (f.Item, Values: f.Values.Select(e => itemValuesStore[(e.MagicNumber, e.Value)]).DistinctBy(e => e.ItemValueId).ToArray()))
             .ToArray();
 
-        var mappedValues = context.ItemValuesMap.Where(e => ids.Contains(e.ItemId)).ToList();
+        var mappedValues = context.ItemValuesMap
+            .Where(e => ids.Contains(e.ItemId))
+            .ToList()
+            .GroupBy(e => e.ItemId)
+            .ToDictionary(e => e.Key, e => e.ToList());
 
         foreach (var item in valueMap)
         {
-            var itemMappedValues = mappedValues.Where(e => e.ItemId == item.Item.Id).ToList();
+            var itemMappedValues = mappedValues.GetValueOrDefault(item.Item.Id) ?? [];
             foreach (var itemValue in item.Values)
             {
                 var existingItem = itemMappedValues.FirstOrDefault(f => f.ItemValueId == itemValue.ItemValueId);
@@ -736,15 +745,29 @@ public sealed class BaseItemRepository
 
         context.SaveChanges();
 
+        var allAncestorIds = tuples
+            .Where(e => e.Item.SupportsAncestors && e.AncestorIds is not null)
+            .SelectMany(e => e.AncestorIds!)
+            .Distinct()
+            .ToArray();
+        var validAncestorIds = context.BaseItems
+            .Where(e => allAncestorIds.Contains(e.Id))
+            .Select(e => e.Id)
+            .ToHashSet();
+        var existingAncestorIds = context.AncestorIds
+            .Where(e => ids.Contains(e.ItemId))
+            .ToList()
+            .GroupBy(e => e.ItemId)
+            .ToDictionary(e => e.Key, e => e.ToList());
+
         foreach (var item in tuples)
         {
             if (item.Item.SupportsAncestors && item.AncestorIds != null)
             {
-                var existingAncestorIds = context.AncestorIds.Where(e => e.ItemId == item.Item.Id).ToList();
-                var validAncestorIds = context.BaseItems.Where(e => item.AncestorIds.Contains(e.Id)).Select(f => f.Id).ToArray();
-                foreach (var ancestorId in validAncestorIds)
+                var itemExistingAncestorIds = existingAncestorIds.GetValueOrDefault(item.Item.Id) ?? [];
+                foreach (var ancestorId in item.AncestorIds.Where(validAncestorIds.Contains))
                 {
-                    var existingAncestorId = existingAncestorIds.FirstOrDefault(e => e.ParentItemId == ancestorId);
+                    var existingAncestorId = itemExistingAncestorIds.FirstOrDefault(e => e.ParentItemId == ancestorId);
                     if (existingAncestorId is null)
                     {
                         context.AncestorIds.Add(new AncestorId()
@@ -757,11 +780,11 @@ public sealed class BaseItemRepository
                     }
                     else
                     {
-                        existingAncestorIds.Remove(existingAncestorId);
+                        itemExistingAncestorIds.Remove(existingAncestorId);
                     }
                 }
 
-                context.AncestorIds.RemoveRange(existingAncestorIds);
+                context.AncestorIds.RemoveRange(itemExistingAncestorIds);
             }
         }
 
@@ -2704,5 +2727,20 @@ public sealed class BaseItemRepository
         }
 
         return result;
+    }
+
+    private sealed class SemaphoreReleaser : IDisposable
+    {
+        private readonly SemaphoreSlim _semaphore;
+
+        public SemaphoreReleaser(SemaphoreSlim semaphore)
+        {
+            _semaphore = semaphore;
+        }
+
+        public void Dispose()
+        {
+            _semaphore.Release();
+        }
     }
 }
