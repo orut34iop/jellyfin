@@ -82,20 +82,29 @@ public class ChapterImagesTask : IScheduledTask
     /// <inheritdoc />
     public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
-        var videos = _libraryManager.GetItemList(new InternalItemsQuery
-        {
-            MediaTypes = [MediaType.Video],
-            IsFolder = false,
-            Recursive = true,
-            DtoOptions = new DtoOptions(false)
+        var videos = _libraryManager.RootFolder.Children
+            .Where(library => !LocalMetadataOnlyImportPolicy.IsEnabled(_libraryManager.GetLibraryOptions(library)))
+            .SelectMany(library => _libraryManager.GetItemList(new InternalItemsQuery
             {
-                EnableImages = false
-            },
-            SourceTypes = [SourceType.Library],
-            IsVirtualItem = false
-        })
-        .OfType<Video>()
-        .ToList();
+                MediaTypes = [MediaType.Video],
+                IsFolder = false,
+                Recursive = true,
+                DtoOptions = new DtoOptions(false)
+                {
+                    EnableImages = false
+                },
+                SourceTypes = [SourceType.Library],
+                IsVirtualItem = false,
+                Parent = library
+            }))
+            .OfType<Video>()
+            .ToList();
+
+        if (videos.Count == 0)
+        {
+            progress.Report(100);
+            return;
+        }
 
         var numComplete = 0;
 

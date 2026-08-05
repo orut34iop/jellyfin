@@ -72,6 +72,16 @@ public class TrickplayImagesTask : IScheduledTask
     /// <inheritdoc />
     public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
     {
+        var libraries = _libraryManager.RootFolder.Children
+            .Where(library => !LocalMetadataOnlyImportPolicy.IsEnabled(_libraryManager.GetLibraryOptions(library)))
+            .ToArray();
+
+        if (libraries.Length == 0)
+        {
+            progress.Report(100);
+            return;
+        }
+
         var query = new InternalItemsQuery
         {
             MediaTypes = [MediaType.Video],
@@ -82,35 +92,56 @@ public class TrickplayImagesTask : IScheduledTask
             Limit = QueryPageLimit
         };
 
-        var numberOfVideos = _libraryManager.GetCount(query);
-
-        var startIndex = 0;
-        var numComplete = 0;
-
-        while (startIndex < numberOfVideos)
+        var numberOfVideos = libraries.Sum(library =>
         {
-            query.StartIndex = startIndex;
-            var videos = _libraryManager.GetItemList(query).OfType<Video>();
+            query.Parent = library;
+            return _libraryManager.GetCount(query);
+        });
 
-            foreach (var video in videos)
+        if (numberOfVideos == 0)
+        {
+            progress.Report(100);
+            return;
+        }
+
+        var numComplete = 0;
+        foreach (var library in libraries)
+        {
+            query.Parent = library;
+            query.StartIndex = 0;
+            while (true)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                try
+                var videos = _libraryManager.GetItemList(query).OfType<Video>().ToList();
+                if (videos.Count == 0)
                 {
-                    var libraryOptions = _libraryManager.GetLibraryOptions(video);
-                    await _trickplayManager.RefreshTrickplayDataAsync(video, false, libraryOptions, cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error creating trickplay files for {ItemName}", video.Name);
+                    break;
                 }
 
-                numComplete++;
-                progress.Report(100d * numComplete / numberOfVideos);
+                foreach (var video in videos)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    try
+                    {
+                        var libraryOptions = _libraryManager.GetLibraryOptions(video);
+                        await _trickplayManager.RefreshTrickplayDataAsync(video, false, libraryOptions, cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error creating trickplay files for {ItemName}", video.Name);
+                    }
+
+                    numComplete++;
+                    progress.Report(100d * numComplete / numberOfVideos);
+                }
+
+                if (videos.Count < QueryPageLimit)
+                {
+                    break;
+                }
+
+                query.StartIndex += QueryPageLimit;
             }
-
-            startIndex += QueryPageLimit;
         }
 
         progress.Report(100);

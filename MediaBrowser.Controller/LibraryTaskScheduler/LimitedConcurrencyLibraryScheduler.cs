@@ -217,10 +217,8 @@ public sealed class LimitedConcurrencyLibraryScheduler : ILimitedConcurrencyLibr
 
         TaskQueueItem[] workItems = null!;
 
-        void UpdateProgress()
-        {
-            progress.Report(workItems.Select(e => e.ProgressValue).Average());
-        }
+        var progressLock = new object();
+        double totalProgress = 0;
 
         workItems = data.Select(item =>
         {
@@ -232,10 +230,20 @@ public sealed class LimitedConcurrencyLibraryScheduler : ILimitedConcurrencyLibr
                     {
                         // round the percent and only update progress if it changed to prevent excessive UpdateProgress calls
                         var innerPercentRounded = Math.Round(innerPercent);
-                        if (queueItem.ProgressValue != innerPercentRounded)
+                        double? aggregateProgress = null;
+                        lock (progressLock)
                         {
-                            queueItem.ProgressValue = innerPercentRounded;
-                            UpdateProgress();
+                            if (queueItem.ProgressValue != innerPercentRounded)
+                            {
+                                totalProgress += innerPercentRounded - queueItem.ProgressValue;
+                                queueItem.ProgressValue = innerPercentRounded;
+                                aggregateProgress = totalProgress / workItems.Length;
+                            }
+                        }
+
+                        if (aggregateProgress.HasValue)
+                        {
+                            progress.Report(aggregateProgress.Value);
                         }
                     }),
                 Worker = (val) => worker((T)val, queueItem.Progress),

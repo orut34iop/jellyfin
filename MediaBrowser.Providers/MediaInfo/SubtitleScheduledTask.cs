@@ -74,6 +74,10 @@ namespace MediaBrowser.Providers.MediaInfo
             foreach (var library in _libraryManager.RootFolder.Children.ToList())
             {
                 var libraryOptions = _libraryManager.GetLibraryOptions(library);
+                if (LocalMetadataOnlyImportPolicy.IsEnabled(libraryOptions))
+                {
+                    continue;
+                }
 
                 string[] subtitleDownloadLanguages;
                 bool skipIfEmbeddedSubtitlesPresent;
