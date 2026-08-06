@@ -9,9 +9,14 @@ case "$OS_NAME" in
         DEFAULT_BACKUP_ROOT="/Volumes/mba2t/backup/jellyfin"
         ;;
     Linux)
+        if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+            DEFAULT_BACKUP_HOME="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
+        else
+            DEFAULT_BACKUP_HOME="$HOME"
+        fi
         DEFAULT_DATA_DIR="/var/lib/jellyfin"
         DEFAULT_CONFIG_DIR="/etc/jellyfin"
-        DEFAULT_BACKUP_ROOT="/home/wiz/jellyfin-userdata-backup"
+        DEFAULT_BACKUP_ROOT="$DEFAULT_BACKUP_HOME/jellyfin-userdata-backup"
         ;;
     *)
         echo "Unsupported operating system: $OS_NAME" >&2
