@@ -533,6 +533,14 @@ namespace MediaBrowser.Controller.Library
         Task UpdatePeopleAsync(BaseItem item, IReadOnlyList<PersonInfo> people, CancellationToken cancellationToken);
 
         /// <summary>
+        /// Creates missing local person items without running metadata providers.
+        /// </summary>
+        /// <param name="people">People to materialize as library items.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>A task representing the operation.</returns>
+        Task EnsurePersonItemsAsync(IReadOnlyList<PersonInfo> people, CancellationToken cancellationToken);
+
+        /// <summary>
         /// Gets the item ids.
         /// </summary>
         /// <param name="query">The query.</param>

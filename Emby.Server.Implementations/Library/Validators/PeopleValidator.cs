@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -49,12 +50,51 @@ public class PeopleValidator
     /// <returns>Task.</returns>
     public async Task ValidatePeople(CancellationToken cancellationToken, IProgress<double> progress)
     {
-        var people = _libraryManager.GetPeopleNames(new InternalPeopleQuery());
-        var localMetadataOnlyImport = _libraryManager.RootFolder.Children.Any(library =>
+        var libraries = _libraryManager.RootFolder.Children;
+        var localMetadataOnlyImport = libraries.Any(library =>
             LocalMetadataOnlyImportPolicy.IsEnabled(_libraryManager.GetLibraryOptions(library)));
+        var localActorLibraryIds = libraries
+            .Where(library =>
+            {
+                var options = _libraryManager.GetLibraryOptions(library);
+                return LocalMetadataOnlyImportPolicy.IsEnabled(options) && options.CreateLocalActorItems;
+            })
+            .Select(library => library.Id)
+            .ToArray();
+        var localActorNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (localActorLibraryIds.Length > 0)
+        {
+            var actorNames = _libraryManager.GetPeopleNames(new InternalPeopleQuery(
+                [PersonKind.Actor.ToString()],
+                Array.Empty<string>())
+            {
+                AncestorIds = localActorLibraryIds
+            });
+            localActorNames.UnionWith(actorNames);
+            var actors = actorNames
+                .Select(name => new PersonInfo { Name = name, Type = PersonKind.Actor })
+                .ToArray();
+            await _libraryManager.EnsurePersonItemsAsync(actors, cancellationToken).ConfigureAwait(false);
+            _logger.LogInformation(
+                "Ensured {Count} local actor items for {LibraryCount} libraries",
+                actors.Length,
+                localActorLibraryIds.Length);
+        }
+
+        var people = localMetadataOnlyImport
+            ? _libraryManager.GetItemList(new InternalItemsQuery
+                {
+                    IncludeItemTypes = [BaseItemKind.Person]
+                })
+                .Select(item => item.Name)
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Where(name => !localActorNames.Contains(name))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray()!
+            : _libraryManager.GetPeopleNames(new InternalPeopleQuery());
 
         var numComplete = 0;
-        var missingLocalMetadataOnlyPeople = 0;
 
         var numPeople = people.Count;
 
@@ -71,11 +111,7 @@ public class PeopleValidator
                 var item = _libraryManager.GetPerson(person);
                 if (item is null)
                 {
-                    if (localMetadataOnlyImport)
-                    {
-                        missingLocalMetadataOnlyPeople++;
-                    }
-                    else
+                    if (!localMetadataOnlyImport)
                     {
                         _logger.LogWarning("Failed to get person: {Name}", person);
                     }
@@ -106,13 +142,6 @@ public class PeopleValidator
             percent /= numPeople;
 
             subProgress.Report(100 * percent);
-        }
-
-        if (missingLocalMetadataOnlyPeople > 0)
-        {
-            _logger.LogInformation(
-                "LocalMetadataOnlyImport enabled; skipped validation for {Count} people without metadata entities",
-                missingLocalMetadataOnlyPeople);
         }
 
         var deadEntities = _libraryManager.GetItemList(new InternalItemsQuery

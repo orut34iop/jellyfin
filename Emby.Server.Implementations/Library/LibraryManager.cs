@@ -2996,15 +2996,71 @@ namespace Emby.Server.Implementations.Library
             if (people is not null)
             {
                 people = people.Where(e => e is not null).ToArray();
-                var localMetadataOnlyImport = LocalMetadataOnlyImportPolicy.IsEnabledForItem(item, this);
+                var libraryOptions = GetLibraryOptions(item);
+                var localMetadataOnlyImport = LocalMetadataOnlyImportPolicy.IsEnabled(libraryOptions);
                 _peopleRepository.UpdatePeople(item.Id, people);
                 if (localMetadataOnlyImport)
                 {
-                    _logger.LogDebug("LocalMetadataOnlyImport enabled; skipping person metadata entity saves for {Item}", item.Path ?? item.Name);
-                    return;
+                    if (!libraryOptions.CreateLocalActorItems)
+                    {
+                        _logger.LogDebug("LocalMetadataOnlyImport enabled; skipping person metadata entity saves for {Item}", item.Path ?? item.Name);
+                        return;
+                    }
+
+                    people = people.Where(person => person.Type == PersonKind.Actor).ToArray();
                 }
 
                 await SavePeopleMetadataAsync(people, cancellationToken, localMetadataOnlyImport).ConfigureAwait(false);
+            }
+        }
+
+        /// <inheritdoc />
+        public async Task EnsurePersonItemsAsync(IReadOnlyList<PersonInfo> people, CancellationToken cancellationToken)
+        {
+            var existingNames = GetItemList(new InternalItemsQuery
+                {
+                    IncludeItemTypes = [BaseItemKind.Person]
+                })
+                .Select(item => item.Name)
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var itemsToCreate = new List<BaseItem>();
+            foreach (var person in people.DistinctBy(person => person.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (string.IsNullOrWhiteSpace(person.Name) || !existingNames.Add(person.Name))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var path = Person.GetPath(person.Name);
+                    var info = Directory.CreateDirectory(path);
+                    var personItem = new Person
+                    {
+                        Name = person.Name,
+                        Id = GetItemByNameId<Person>(path),
+                        DateCreated = info.CreationTimeUtc,
+                        DateModified = info.LastWriteTimeUtc,
+                        Path = path,
+                        DateLastSaved = DateTime.UtcNow
+                    };
+                    personItem.PresentationUniqueKey = personItem.CreatePresentationUniqueKey();
+                    itemsToCreate.Add(personItem);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to create person {Name}", person.Name);
+                }
+            }
+
+            foreach (var batch in itemsToCreate.Chunk(500))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                CreateItems(batch, null, cancellationToken);
+                await Task.Yield();
             }
         }
 

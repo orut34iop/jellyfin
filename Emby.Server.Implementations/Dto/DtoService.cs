@@ -604,7 +604,8 @@ namespace Emby.Server.Implementations.Dto
         /// <param name="user">The requesting user.</param>
         private void AttachPeople(BaseItemDto dto, BaseItem item, User? user = null)
         {
-            var includeLocalMetadataOnlyPeople = LocalMetadataOnlyImportPolicy.IsEnabledForItem(item, _libraryManager);
+            var libraryOptions = _libraryManager.GetLibraryOptions(item);
+            var includeLocalMetadataOnlyPeople = LocalMetadataOnlyImportPolicy.IsEnabled(libraryOptions);
 
             // Ordering by person type to ensure actors and artists are at the front.
             // This is taking advantage of the fact that they both begin with A
@@ -646,22 +647,15 @@ namespace Emby.Server.Implementations.Dto
                 })
                 .ToList();
 
-            if (includeLocalMetadataOnlyPeople)
-            {
-                // Local-only imports intentionally skip creating Person library items,
-                // so avoid a guaranteed lookup miss per person.
-                dto.People = people.Select(person => new BaseItemPerson
-                {
-                    Name = person.Name,
-                    Role = person.Role,
-                    Type = person.Type
-                }).ToArray();
-                return;
-            }
-
             var list = new List<BaseItemPerson>();
 
-            Dictionary<string, Person> dictionary = people.Select(p => p.Name)
+            var peopleWithItems = includeLocalMetadataOnlyPeople
+                ? libraryOptions.CreateLocalActorItems
+                    ? people.Where(person => person.Type == PersonKind.Actor)
+                    : []
+                : people;
+
+            Dictionary<string, Person> dictionary = peopleWithItems.Select(p => p.Name)
                 .Distinct(StringComparer.OrdinalIgnoreCase).Select(c =>
                 {
                     try
@@ -713,6 +707,10 @@ namespace Emby.Server.Implementations.Dto
                         }
                     }
 
+                    list.Add(baseItemPerson);
+                }
+                else if (includeLocalMetadataOnlyPeople)
+                {
                     list.Add(baseItemPerson);
                 }
             }

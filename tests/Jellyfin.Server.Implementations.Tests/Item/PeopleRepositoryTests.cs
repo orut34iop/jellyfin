@@ -25,6 +25,7 @@ public sealed class PeopleRepositoryTests : IDisposable
     private readonly CommandCaptureInterceptor _commandCaptureInterceptor = new();
     private readonly PeopleRepository _repository;
     private readonly Guid _itemId = Guid.NewGuid();
+    private readonly Guid _ancestorId = Guid.NewGuid();
 
     public PeopleRepositoryTests()
     {
@@ -88,6 +89,25 @@ public sealed class PeopleRepositoryTests : IDisposable
         Assert.DoesNotContain(result, person => person.Type == PersonKind.Director);
     }
 
+    [Fact]
+    public void GetPeopleNames_WithAncestorId_ReturnsOnlyPeopleBelowAncestor()
+    {
+        var result = _repository.GetPeopleNames(new InternalPeopleQuery(
+            new[] { PersonKind.Actor.ToString() },
+            Array.Empty<string>())
+        {
+            AncestorIds = [_ancestorId]
+        });
+
+        Assert.Equal(2, result.Count);
+        Assert.Contains("Alice Actor", result);
+        Assert.Contains("Bob Actor", result);
+        Assert.DoesNotContain("Unrelated Actor", result);
+        var command = Assert.Single(_commandCaptureInterceptor.Commands);
+        Assert.Contains("FROM \"AncestorIds\" AS", command, StringComparison.Ordinal);
+        Assert.Contains("INNER JOIN \"PeopleBaseItemMap\" AS", command, StringComparison.Ordinal);
+    }
+
     public void Dispose()
     {
         _connection.Dispose();
@@ -106,6 +126,7 @@ public sealed class PeopleRepositoryTests : IDisposable
     {
         var item = new BaseItemEntity { Id = _itemId, Type = "Movie" };
         var otherItem = new BaseItemEntity { Id = Guid.NewGuid(), Type = "Movie" };
+        var ancestor = new BaseItemEntity { Id = _ancestorId, Type = "CollectionFolder" };
         var alice = new People { Id = Guid.NewGuid(), Name = "Alice Actor", PersonType = PersonKind.Actor.ToString() };
         var bob = new People { Id = Guid.NewGuid(), Name = "Bob Actor", PersonType = PersonKind.Actor.ToString() };
         var dana = new People { Id = Guid.NewGuid(), Name = "Dana Director", PersonType = PersonKind.Director.ToString() };
@@ -116,6 +137,13 @@ public sealed class PeopleRepositoryTests : IDisposable
             CreateMapping(item, bob, "Supporting", 0, 30),
             CreateMapping(item, dana, string.Empty, 2, 10),
             CreateMapping(otherItem, unrelated, string.Empty, 0, 30));
+        context.AncestorIds.Add(new AncestorId
+        {
+            ItemId = item.Id,
+            Item = item,
+            ParentItemId = ancestor.Id,
+            ParentItem = ancestor
+        });
         context.SaveChanges();
     }
 

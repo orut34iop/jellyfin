@@ -72,7 +72,26 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
     public IReadOnlyList<string> GetPeopleNames(InternalPeopleQuery filter)
     {
         using var context = _dbProvider.CreateDbContext();
-        var dbQuery = TranslateQuery(context.Peoples.AsNoTracking(), context, filter).Select(e => e.Name).Distinct();
+        IQueryable<string> dbQuery;
+        if (filter.AncestorIds.Length > 0)
+        {
+            var mappingsBelowAncestors = context.AncestorIds.AsNoTracking()
+                .Where(ancestor => filter.AncestorIds.Contains(ancestor.ParentItemId))
+                .Join(
+                    context.PeopleBaseItemMap.AsNoTracking(),
+                    ancestor => ancestor.ItemId,
+                    mapping => mapping.ItemId,
+                    (_, mapping) => mapping);
+            dbQuery = TranslateItemQuery(mappingsBelowAncestors, context, filter, applyAncestorFilter: false)
+                .Select(mapping => mapping.People.Name)
+                .Distinct();
+        }
+        else
+        {
+            dbQuery = TranslateQuery(context.Peoples.AsNoTracking(), context, filter)
+                .Select(e => e.Name)
+                .Distinct();
+        }
 
         // dbQuery = dbQuery.OrderBy(e => e.ListOrder);
         if (filter.Limit > 0)
@@ -247,6 +266,12 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
             query = query.Where(e => e.BaseItems!.Any(w => w.ItemId.Equals(filter.AppearsInItemId)));
         }
 
+        if (filter.AncestorIds.Length > 0)
+        {
+            query = query.Where(e => e.BaseItems!.Any(mapping => context.AncestorIds.Any(ancestor =>
+                ancestor.ItemId == mapping.ItemId && filter.AncestorIds.Contains(ancestor.ParentItemId))));
+        }
+
         var queryPersonTypes = filter.PersonTypes.Where(IsValidPersonType).ToList();
         if (queryPersonTypes.Count > 0)
         {
@@ -277,7 +302,8 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
     private IQueryable<PeopleBaseItemMap> TranslateItemQuery(
         IQueryable<PeopleBaseItemMap> query,
         JellyfinDbContext context,
-        InternalPeopleQuery filter)
+        InternalPeopleQuery filter,
+        bool applyAncestorFilter = true)
     {
         if (filter.User is not null && filter.IsFavorite.HasValue)
         {
@@ -292,6 +318,12 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
         if (!filter.AppearsInItemId.IsEmpty())
         {
             query = query.Where(e => e.People.BaseItems!.Any(w => w.ItemId.Equals(filter.AppearsInItemId)));
+        }
+
+        if (applyAncestorFilter && filter.AncestorIds.Length > 0)
+        {
+            query = query.Where(mapping => context.AncestorIds.Any(ancestor =>
+                ancestor.ItemId == mapping.ItemId && filter.AncestorIds.Contains(ancestor.ParentItemId)));
         }
 
         var queryPersonTypes = filter.PersonTypes.Where(IsValidPersonType).ToList();

@@ -28,6 +28,8 @@ namespace MediaBrowser.Controller.Entities
 
         public Guid ItemId { get; set; }
 
+        public Guid[] AncestorIds { get; set; } = Array.Empty<Guid>();
+
         public IReadOnlyList<string> PersonTypes { get; }
 
         public IReadOnlyList<string> ExcludePersonTypes { get; }

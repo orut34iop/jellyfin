@@ -61,17 +61,52 @@ public class DtoServiceTests
         libraryManager.Verify(x => x.GetPerson("Missing Person Entity"), Times.Once);
     }
 
+    [Fact]
+    public void AttachPeople_LocalMetadataOnlyImportWithActorItemsIncludesActorId()
+    {
+        var movie = new Movie { Id = Guid.NewGuid(), Name = "Local Movie" };
+        var actor = new PersonInfo
+        {
+            Name = "Local Actor",
+            Role = "Lead",
+            Type = PersonKind.Actor
+        };
+        var director = new PersonInfo
+        {
+            Name = "Local Director",
+            Type = PersonKind.Director
+        };
+        var actorItem = new Person { Id = Guid.NewGuid(), Name = actor.Name };
+
+        var (dto, libraryManager) = AttachPeople(
+            movie,
+            [actor, director],
+            localMetadataOnlyImport: true,
+            createLocalActorItems: true,
+            actorItem);
+
+        Assert.Equal(2, dto.People.Length);
+        Assert.Equal(actorItem.Id, dto.People[0].Id);
+        Assert.Equal(Guid.Empty, dto.People[1].Id);
+        libraryManager.Verify(x => x.GetPerson(actor.Name), Times.Once);
+        libraryManager.Verify(x => x.GetPerson(director.Name), Times.Never);
+    }
+
     private static (BaseItemDto Dto, Mock<ILibraryManager> LibraryManager) AttachPeople(
         Movie movie,
         IReadOnlyList<PersonInfo> people,
-        bool localMetadataOnlyImport)
+        bool localMetadataOnlyImport,
+        bool createLocalActorItems = false,
+        Person? actorItem = null)
     {
         var libraryManager = new Mock<ILibraryManager>();
         libraryManager.Setup(x => x.GetPeople(movie)).Returns(people);
-        libraryManager.Setup(x => x.GetPerson(It.IsAny<string>())).Returns((Person?)null);
+        libraryManager.Setup(x => x.GetPerson(It.IsAny<string>())).Returns((string name) =>
+            string.Equals(name, actorItem?.Name, StringComparison.Ordinal) ? actorItem : null);
         libraryManager.Setup(x => x.GetLibraryOptions(movie)).Returns(new LibraryOptions
         {
-            LocalMetadataOnlyImport = localMetadataOnlyImport
+            LocalMetadataOnlyImport = localMetadataOnlyImport,
+            CreateLocalActorItems = createLocalActorItems
         });
 
         var dtoService = new DtoService(

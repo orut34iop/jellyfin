@@ -62,6 +62,8 @@ namespace MediaBrowser.Model.Configuration
 
         public bool LocalMetadataOnlyImport { get; set; }
 
+        public bool CreateLocalActorItems { get; set; }
+
         [Obsolete("Disable remote providers in TypeOptions instead")]
         public bool EnableInternetProviders { get; set; }
 
