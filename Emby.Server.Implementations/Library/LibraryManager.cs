@@ -959,12 +959,22 @@ namespace Emby.Server.Implementations.Library
         {
             var path = Person.GetPath(name);
             var id = GetItemByNameId<Person>(path);
-            if (GetItemById(id) is Person item)
+            if (GetItemById(id) is Person item
+                && string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase))
             {
                 return item;
             }
 
-            return null;
+            return GetItemList(new InternalItemsQuery
+                {
+                    IncludeItemTypes = [BaseItemKind.Person],
+                    Name = name,
+                    UseRawName = true,
+                    Limit = 1,
+                    DtoOptions = new DtoOptions(true)
+                })
+                .OfType<Person>()
+                .FirstOrDefault(candidate => string.Equals(candidate.Name, name, StringComparison.OrdinalIgnoreCase));
         }
 
         /// <summary>
@@ -3001,13 +3011,16 @@ namespace Emby.Server.Implementations.Library
                 _peopleRepository.UpdatePeople(item.Id, people);
                 if (localMetadataOnlyImport)
                 {
-                    if (!libraryOptions.CreateLocalActorItems)
+                    if (!libraryOptions.CreateLocalPersonItems && !libraryOptions.CreateLocalActorItems)
                     {
                         _logger.LogDebug("LocalMetadataOnlyImport enabled; skipping person metadata entity saves for {Item}", item.Path ?? item.Name);
                         return;
                     }
 
-                    people = people.Where(person => person.Type == PersonKind.Actor).ToArray();
+                    if (!libraryOptions.CreateLocalPersonItems)
+                    {
+                        people = people.Where(person => person.Type == PersonKind.Actor).ToArray();
+                    }
                 }
 
                 await SavePeopleMetadataAsync(people, cancellationToken, localMetadataOnlyImport).ConfigureAwait(false);
@@ -3025,7 +3038,8 @@ namespace Emby.Server.Implementations.Library
                 .Where(name => !string.IsNullOrWhiteSpace(name))
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            var itemsToCreate = new List<BaseItem>();
+            const int BatchSize = 5000;
+            var itemsToCreate = new List<BaseItem>(BatchSize);
             foreach (var person in people.DistinctBy(person => person.Name, StringComparer.OrdinalIgnoreCase))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -3037,18 +3051,32 @@ namespace Emby.Server.Implementations.Library
                 try
                 {
                     var path = Person.GetPath(person.Name);
-                    var info = Directory.CreateDirectory(path);
+                    var id = GetItemByNameId<Person>(path);
+                    if (GetItemById(id) is Person existingPerson
+                        && !string.Equals(existingPerson.Name, person.Name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var forceCaseInsensitiveId = _configurationManager.Configuration.EnableNormalizedItemByNameIds;
+                        id = GetNewItemIdInternal(path + '\0' + person.Name, typeof(Person), forceCaseInsensitiveId);
+                    }
+
+                    var createdAt = DateTime.UtcNow;
                     var personItem = new Person
                     {
                         Name = person.Name,
-                        Id = GetItemByNameId<Person>(path),
-                        DateCreated = info.CreationTimeUtc,
-                        DateModified = info.LastWriteTimeUtc,
+                        Id = id,
+                        DateCreated = createdAt,
+                        DateModified = createdAt,
                         Path = path,
                         DateLastSaved = DateTime.UtcNow
                     };
                     personItem.PresentationUniqueKey = personItem.CreatePresentationUniqueKey();
                     itemsToCreate.Add(personItem);
+                    if (itemsToCreate.Count == BatchSize)
+                    {
+                        CreateItems(itemsToCreate.ToArray(), null, cancellationToken);
+                        itemsToCreate.Clear();
+                        await Task.Yield();
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -3056,11 +3084,10 @@ namespace Emby.Server.Implementations.Library
                 }
             }
 
-            foreach (var batch in itemsToCreate.Chunk(500))
+            if (itemsToCreate.Count > 0)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                CreateItems(batch, null, cancellationToken);
-                await Task.Yield();
+                CreateItems(itemsToCreate, null, cancellationToken);
             }
         }
 

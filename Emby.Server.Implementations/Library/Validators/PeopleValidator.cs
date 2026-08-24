@@ -53,33 +53,55 @@ public class PeopleValidator
         var libraries = _libraryManager.RootFolder.Children;
         var localMetadataOnlyImport = libraries.Any(library =>
             LocalMetadataOnlyImportPolicy.IsEnabled(_libraryManager.GetLibraryOptions(library)));
+        var localPersonLibraryIds = libraries
+            .Where(library =>
+            {
+                var options = _libraryManager.GetLibraryOptions(library);
+                return LocalMetadataOnlyImportPolicy.IsEnabled(options) && options.CreateLocalPersonItems;
+            })
+            .Select(library => library.Id)
+            .ToArray();
         var localActorLibraryIds = libraries
             .Where(library =>
             {
                 var options = _libraryManager.GetLibraryOptions(library);
-                return LocalMetadataOnlyImportPolicy.IsEnabled(options) && options.CreateLocalActorItems;
+                return LocalMetadataOnlyImportPolicy.IsEnabled(options)
+                    && !options.CreateLocalPersonItems
+                    && options.CreateLocalActorItems;
             })
             .Select(library => library.Id)
             .ToArray();
-        var localActorNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var localPersonNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (localPersonLibraryIds.Length > 0)
+        {
+            var personNames = _libraryManager.GetPeopleNames(new InternalPeopleQuery
+            {
+                AncestorIds = localPersonLibraryIds
+            });
+            localPersonNames.UnionWith(personNames);
+        }
 
         if (localActorLibraryIds.Length > 0)
         {
-            var actorNames = _libraryManager.GetPeopleNames(new InternalPeopleQuery(
+            localPersonNames.UnionWith(_libraryManager.GetPeopleNames(new InternalPeopleQuery(
                 [PersonKind.Actor.ToString()],
                 Array.Empty<string>())
             {
                 AncestorIds = localActorLibraryIds
-            });
-            localActorNames.UnionWith(actorNames);
-            var actors = actorNames
-                .Select(name => new PersonInfo { Name = name, Type = PersonKind.Actor })
+            }));
+        }
+
+        if (localPersonNames.Count > 0)
+        {
+            var peopleToMaterialize = localPersonNames
+                .Select(name => new PersonInfo { Name = name })
                 .ToArray();
-            await _libraryManager.EnsurePersonItemsAsync(actors, cancellationToken).ConfigureAwait(false);
+            await _libraryManager.EnsurePersonItemsAsync(peopleToMaterialize, cancellationToken).ConfigureAwait(false);
             _logger.LogInformation(
-                "Ensured {Count} local actor items for {LibraryCount} libraries",
-                actors.Length,
-                localActorLibraryIds.Length);
+                "Ensured {Count} local person items for {LibraryCount} libraries",
+                peopleToMaterialize.Length,
+                localPersonLibraryIds.Length + localActorLibraryIds.Length);
         }
 
         var people = localMetadataOnlyImport
@@ -89,7 +111,7 @@ public class PeopleValidator
                 })
                 .Select(item => item.Name)
                 .Where(name => !string.IsNullOrWhiteSpace(name))
-                .Where(name => !localActorNames.Contains(name))
+                .Where(name => !localPersonNames.Contains(name))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray()!
             : _libraryManager.GetPeopleNames(new InternalPeopleQuery());

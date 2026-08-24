@@ -650,9 +650,11 @@ namespace Emby.Server.Implementations.Dto
             var list = new List<BaseItemPerson>();
 
             var peopleWithItems = includeLocalMetadataOnlyPeople
-                ? libraryOptions.CreateLocalActorItems
-                    ? people.Where(person => person.Type == PersonKind.Actor)
-                    : []
+                ? libraryOptions.CreateLocalPersonItems
+                    ? people
+                    : libraryOptions.CreateLocalActorItems
+                        ? people.Where(person => person.Type == PersonKind.Actor)
+                        : []
                 : people;
 
             Dictionary<string, Person> dictionary = peopleWithItems.Select(p => p.Name)
