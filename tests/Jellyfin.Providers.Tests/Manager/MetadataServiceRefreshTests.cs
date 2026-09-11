@@ -331,7 +331,7 @@ namespace Jellyfin.Providers.Tests.Manager
                 MovieInfo id,
                 MetadataRefreshOptions options,
                 ICollection<IMetadataProvider> providers)
-                => RefreshWithProviders(metadata, id, options, providers, ImageProvider, false, CancellationToken.None);
+                => RefreshWithProviders(metadata, id, options, providers, ImageProvider, false, new LibraryOptions(), CancellationToken.None);
         }
 
         private sealed class TestItemMetadataService : MetadataService<TestItem, ItemLookupInfo>

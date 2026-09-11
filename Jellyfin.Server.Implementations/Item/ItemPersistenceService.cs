@@ -26,6 +26,8 @@ namespace Jellyfin.Server.Implementations.Item;
 /// </summary>
 public class ItemPersistenceService : IItemPersistenceService
 {
+    private static readonly SemaphoreSlim ItemWriteSemaphore = new(1, 1);
+
     private readonly IDbContextFactory<JellyfinDbContext> _dbProvider;
     private readonly IServerApplicationHost _appHost;
     private readonly ILogger<ItemPersistenceService> _logger;
@@ -163,7 +165,15 @@ public class ItemPersistenceService : IItemPersistenceService
     /// <inheritdoc />
     public void SaveItems(IReadOnlyList<BaseItemDto> items, CancellationToken cancellationToken)
     {
-        UpdateOrInsertItems(items, cancellationToken);
+        ItemWriteSemaphore.Wait(cancellationToken);
+        try
+        {
+            UpdateOrInsertItems(items, cancellationToken);
+        }
+        finally
+        {
+            ItemWriteSemaphore.Release();
+        }
     }
 
     /// <inheritdoc />

@@ -98,6 +98,11 @@ public class TrickplayProvider : ICustomMetadataProvider<Episode>,
     private async Task<ItemUpdateType> FetchInternal(Video video, MetadataRefreshOptions options, CancellationToken cancellationToken)
     {
         var libraryOptions = _libraryManager.GetLibraryOptions(video);
+        if (LocalMetadataOnlyImportPolicy.IsEnabled(libraryOptions))
+        {
+            return ItemUpdateType.None;
+        }
+
         bool? enableDuringScan = libraryOptions?.ExtractTrickplayImagesDuringLibraryScan;
         bool replace = options.RegenerateTrickplay && options.MetadataRefreshMode > MetadataRefreshMode.Default;
 

@@ -89,17 +89,19 @@ public class MediaInfoHelper
     /// <param name="request">The current <see cref="HttpRequest"/>.</param>
     /// <param name="mediaSourceId">Media source id.</param>
     /// <param name="liveStreamId">Live stream id.</param>
+    /// <param name="allowMediaProbe">Whether media probing is allowed.</param>
     /// <returns>A <see cref="Task"/> containing the <see cref="PlaybackInfoResponse"/>.</returns>
     public async Task<PlaybackInfoResponse> GetPlaybackInfo(
         BaseItem item,
         User? user,
         HttpRequest request,
         string? mediaSourceId = null,
-        string? liveStreamId = null)
+        string? liveStreamId = null,
+        bool allowMediaProbe = true)
     {
         var result = new PlaybackInfoResponse();
 
-        var mediaSources = await ResolvePlaybackMediaSources(item, user, mediaSourceId, liveStreamId).ConfigureAwait(false);
+        var mediaSources = await ResolvePlaybackMediaSources(item, user, mediaSourceId, liveStreamId, allowMediaProbe).ConfigureAwait(false);
 
         if (mediaSources.Length == 0)
         {
@@ -135,7 +137,7 @@ public class MediaInfoHelper
         return result;
     }
 
-    private async Task<MediaSourceInfo[]> ResolvePlaybackMediaSources(BaseItem item, User? user, string? mediaSourceId, string? liveStreamId)
+    private async Task<MediaSourceInfo[]> ResolvePlaybackMediaSources(BaseItem item, User? user, string? mediaSourceId, string? liveStreamId, bool allowMediaProbe)
     {
         if (!string.IsNullOrWhiteSpace(liveStreamId))
         {
@@ -145,7 +147,7 @@ public class MediaInfoHelper
         }
 
         // TODO (moved from MediaBrowser.Api) handle supportedLiveMediaTypes?
-        var mediaSourcesList = await _mediaSourceManager.GetPlaybackMediaSources(item, user, true, true, CancellationToken.None).ConfigureAwait(false);
+        var mediaSourcesList = await _mediaSourceManager.GetPlaybackMediaSources(item, user, allowMediaProbe, true, CancellationToken.None).ConfigureAwait(false);
 
         if (string.IsNullOrWhiteSpace(mediaSourceId))
         {

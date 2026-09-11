@@ -1,11 +1,13 @@
 using System;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using AutoFixture;
 using AutoFixture.AutoMoq;
 using Emby.Server.Implementations.IO;
 using Jellyfin.Extensions;
+using MediaBrowser.Controller.Library;
 using Xunit;
 
 namespace Jellyfin.Server.Implementations.Tests.IO;
@@ -108,12 +110,121 @@ public partial class ManagedFileSystemTests
         string testFileDir = Path.Combine(Path.GetTempPath(), "jellyfin-test-data");
         string testFileName = Path.Combine(testFileDir, Path.GetRandomFileName() + "-danglingsym.link");
 
-        Directory.CreateDirectory(testFileDir);
-        Assert.Equal(0, symlink("thispathdoesntexist", testFileName));
-        Assert.True(File.Exists(testFileName));
+        try
+        {
+            Directory.CreateDirectory(testFileDir);
+            Assert.Equal(0, symlink("thispathdoesntexist", testFileName));
+            Assert.True(File.Exists(testFileName));
 
-        var metadata = _sut.GetFileInfo(testFileName);
-        Assert.False(metadata.Exists);
+            var metadata = _sut.GetFileInfo(testFileName);
+            Assert.False(metadata.Exists);
+        }
+        finally
+        {
+            File.Delete(testFileName);
+        }
+    }
+
+    [Fact]
+    public void GetFileSystemInfo_LocalMetadataOnlyImportDanglingVideoSymlink_ExistsWithPlaceholderMetadata()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Unix-only test");
+
+        string testFileDir = Path.Combine(Path.GetTempPath(), "jellyfin-test-data");
+        string testFileName = Path.Combine(testFileDir, Path.GetRandomFileName() + ".iso");
+
+        try
+        {
+            Directory.CreateDirectory(testFileDir);
+            Assert.Equal(0, symlink("thispathdoesntexist", testFileName));
+            Assert.True(File.Exists(testFileName));
+
+            var metadata = _sut.GetFileSystemInfo(testFileName, skipResolvingVideoSymlinks: true);
+
+            Assert.True(metadata.Exists);
+            Assert.False(metadata.IsDirectory);
+            Assert.Equal(LocalMetadataOnlyImportPolicy.PlaceholderVideoLength, metadata.Length);
+            Assert.Equal(LocalMetadataOnlyImportPolicy.StableFileTimestampUtc, metadata.CreationTimeUtc);
+            Assert.Equal(LocalMetadataOnlyImportPolicy.StableFileTimestampUtc, metadata.LastWriteTimeUtc);
+        }
+        finally
+        {
+            File.Delete(testFileName);
+        }
+    }
+
+    [Fact]
+    public void GetFileInfo_LocalMetadataOnlyImportVideoFile_ReturnsPlaceholderWithoutChangingDefault()
+    {
+        string testFileDir = Path.Combine(Path.GetTempPath(), "jellyfin-test-data", Path.GetRandomFileName());
+        string videoPath = Path.Combine(testFileDir, "movie.mkv");
+
+        try
+        {
+            Directory.CreateDirectory(testFileDir);
+            File.WriteAllBytes(videoPath, [0, 1, 2, 3]);
+
+            var defaultMetadata = _sut.GetFileSystemInfo(videoPath);
+            Assert.True(defaultMetadata.Exists);
+            Assert.Equal(4, defaultMetadata.Length);
+
+            var localMetadataOnlyMetadata = _sut.GetFileSystemInfo(videoPath, true);
+            Assert.True(localMetadataOnlyMetadata.Exists);
+            Assert.False(localMetadataOnlyMetadata.IsDirectory);
+            Assert.Equal(LocalMetadataOnlyImportPolicy.PlaceholderVideoLength, localMetadataOnlyMetadata.Length);
+            Assert.Equal(LocalMetadataOnlyImportPolicy.StableFileTimestampUtc, localMetadataOnlyMetadata.CreationTimeUtc);
+            Assert.Equal(LocalMetadataOnlyImportPolicy.StableFileTimestampUtc, localMetadataOnlyMetadata.LastWriteTimeUtc);
+        }
+        finally
+        {
+            if (Directory.Exists(testFileDir))
+            {
+                Directory.Delete(testFileDir, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void GetFileSystemEntries_LocalMetadataOnlyImportDanglingVideoSymlink_ReturnsPlaceholderWithLocalMetadataFiles()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Unix-only test");
+
+        string testFileDir = Path.Combine(Path.GetTempPath(), "jellyfin-test-data", Path.GetRandomFileName());
+        string videoPath = Path.Combine(testFileDir, "movie.iso");
+        string nfoPath = Path.Combine(testFileDir, "movie.nfo");
+        string posterPath = Path.Combine(testFileDir, "movie-poster.jpg");
+
+        try
+        {
+            Directory.CreateDirectory(testFileDir);
+            Assert.Equal(0, symlink("thispathdoesntexist", videoPath));
+            File.WriteAllText(nfoPath, "<movie><title>Local Movie</title></movie>");
+            FileHelper.CreateEmpty(posterPath);
+
+            var metadata = _sut.GetFileSystemEntries(testFileDir, false, true).ToArray();
+
+            var video = Assert.Single(metadata, entry => string.Equals(entry.FullName, videoPath, StringComparison.Ordinal));
+            Assert.True(video.Exists);
+            Assert.False(video.IsDirectory);
+            Assert.Equal(LocalMetadataOnlyImportPolicy.PlaceholderVideoLength, video.Length);
+            Assert.Equal(LocalMetadataOnlyImportPolicy.StableFileTimestampUtc, video.CreationTimeUtc);
+            Assert.Equal(LocalMetadataOnlyImportPolicy.StableFileTimestampUtc, video.LastWriteTimeUtc);
+
+            var directVideo = _sut.GetFileSystemInfo(videoPath, true);
+            Assert.True(directVideo.Exists);
+            Assert.False(directVideo.IsDirectory);
+            Assert.Equal(LocalMetadataOnlyImportPolicy.PlaceholderVideoLength, directVideo.Length);
+
+            Assert.Contains(metadata, entry => string.Equals(entry.FullName, nfoPath, StringComparison.Ordinal) && entry.Exists);
+            Assert.Contains(metadata, entry => string.Equals(entry.FullName, posterPath, StringComparison.Ordinal) && entry.Exists);
+        }
+        finally
+        {
+            if (Directory.Exists(testFileDir))
+            {
+                Directory.Delete(testFileDir, true);
+            }
+        }
     }
 
     [SuppressMessage("Naming Rules", "SA1300:ElementMustBeginWithUpperCaseLetter", Justification = "Have to")]

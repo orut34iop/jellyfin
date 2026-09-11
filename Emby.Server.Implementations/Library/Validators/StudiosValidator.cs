@@ -61,6 +61,14 @@ public class StudiosValidator
         }).Cast<Studio>()
         .GroupBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
         .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        var localMetadataOnlyImport = PostScanAggregateRefreshOptions.HasLocalMetadataOnlyImportLibrary(
+            _libraryManager.RootFolder.Children,
+            _libraryManager.GetLibraryOptions);
+
+        if (localMetadataOnlyImport)
+        {
+            _logger.LogDebug("LocalMetadataOnlyImport enabled; validating studio metadata without remote refresh");
+        }
 
         var numComplete = 0;
         var count = names.Count;
@@ -81,7 +89,14 @@ public class StudiosValidator
 
                 if (!existingStudioIds.Contains(item.Id))
                 {
-                    await item.RefreshMetadata(cancellationToken).ConfigureAwait(false);
+                    if (localMetadataOnlyImport)
+                        {
+                            await item.RefreshMetadata(PostScanAggregateRefreshOptions.CreateValidationOnly(), cancellationToken).ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            await item.RefreshMetadata(cancellationToken).ConfigureAwait(false);
+                        }
                     refreshed++;
                 }
             }

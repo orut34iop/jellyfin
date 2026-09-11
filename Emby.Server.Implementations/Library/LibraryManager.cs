@@ -1217,12 +1217,22 @@ namespace Emby.Server.Implementations.Library
         {
             var path = Person.GetPath(name);
             var id = GetItemByNameId<Person>(path);
-            if (GetItemById(id) is Person item)
+            if (GetItemById(id) is Person item
+                && string.Equals(item.Name, name, StringComparison.OrdinalIgnoreCase))
             {
                 return item;
             }
 
-            return null;
+            return GetItemList(new InternalItemsQuery
+                {
+                    IncludeItemTypes = [BaseItemKind.Person],
+                    Name = name,
+                    UseRawName = true,
+                    Limit = 1,
+                    DtoOptions = new DtoOptions(true)
+                })
+                .OfType<Person>()
+                .FirstOrDefault(candidate => string.Equals(candidate.Name, name, StringComparison.OrdinalIgnoreCase));
         }
 
         /// <inheritdoc />
@@ -2540,14 +2550,19 @@ namespace Emby.Server.Implementations.Library
         }
 
         /// <inheritdoc />
-        public async Task UpdateImagesAsync(BaseItem item, bool forceUpdate = false)
+        public Task UpdateImagesAsync(BaseItem item, bool forceUpdate = false)
+            => UpdateImagesAsync(item, forceUpdate, false);
+
+        private async Task UpdateImagesAsync(BaseItem item, bool forceUpdate, bool skipRemoteImages)
         {
             ArgumentNullException.ThrowIfNull(item);
 
+            var localMetadataOnlyImport = skipRemoteImages || LocalMetadataOnlyImportPolicy.IsEnabledForItem(item, this);
             var outdated = forceUpdate
-                ? item.ImageInfos.Where(i => i.Path is not null).ToArray()
-                : item.ImageInfos.Where(ImageNeedsRefresh).ToArray();
-
+                ? item.ImageInfos.Where(i => i.Path is not null && (!localMetadataOnlyImport || !i.IsLocalFile)).ToArray()
+                : localMetadataOnlyImport
+                    ? item.ImageInfos.Where(i => i.Path is not null && !i.IsLocalFile).ToArray()
+                    : item.ImageInfos.Where(ImageNeedsRefresh).ToArray();
             var parentItem = item.GetParent();
             var isLiveTvShow = item.SourceType != SourceType.Library &&
                                parentItem is not null &&
@@ -2565,6 +2580,12 @@ namespace Emby.Server.Implementations.Library
                 var image = img;
                 if (!img.IsLocalFile)
                 {
+                    if (localMetadataOnlyImport)
+                    {
+                        _logger.LogDebug("LocalMetadataOnlyImport enabled; skipping remote image {Url}", img.Path);
+                        continue;
+                    }
+
                     try
                     {
                         var index = item.GetImageIndex(img);
@@ -2776,14 +2797,18 @@ namespace Emby.Server.Implementations.Library
             await _persistenceService.ReattachUserDataAsync(item, cancellationToken).ConfigureAwait(false);
         }
 
-        public async Task RunMetadataSavers(BaseItem item, ItemUpdateType updateReason)
+        public Task RunMetadataSavers(BaseItem item, ItemUpdateType updateReason)
+            => RunMetadataSavers(item, updateReason, false);
+
+        private async Task RunMetadataSavers(BaseItem item, ItemUpdateType updateReason, bool skipRemoteImages)
         {
-            if (item.IsFileProtocol)
+            var localMetadataOnlyImport = skipRemoteImages || LocalMetadataOnlyImportPolicy.IsEnabledForItem(item, this);
+            if (item.IsFileProtocol && !localMetadataOnlyImport)
             {
                 await ProviderManager.SaveMetadataAsync(item, updateReason).ConfigureAwait(false);
             }
 
-            await UpdateImagesAsync(item, updateReason >= ItemUpdateType.ImageUpdate).ConfigureAwait(false);
+            await UpdateImagesAsync(item, updateReason >= ItemUpdateType.ImageUpdate, localMetadataOnlyImport).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -3674,13 +3699,100 @@ namespace Emby.Server.Implementations.Library
             if (people is not null)
             {
                 people = people.Where(e => e is not null).ToArray();
+                var libraryOptions = GetLibraryOptions(item);
+                var localMetadataOnlyImport = LocalMetadataOnlyImportPolicy.IsEnabled(libraryOptions);
                 _peopleRepository.UpdatePeople(item.Id, people);
-                await SavePeopleMetadataAsync(people, cancellationToken).ConfigureAwait(false);
+                if (localMetadataOnlyImport)
+                {
+                    if (!libraryOptions.CreateLocalPersonItems && !libraryOptions.CreateLocalActorItems)
+                    {
+                        _logger.LogDebug("LocalMetadataOnlyImport enabled; skipping person metadata entity saves for {Item}", item.Path ?? item.Name);
+                        return;
+                    }
+
+                    if (!libraryOptions.CreateLocalPersonItems)
+                    {
+                        people = people.Where(person => person.Type == PersonKind.Actor).ToArray();
+                    }
+                }
+
+                await SavePeopleMetadataAsync(people, cancellationToken, localMetadataOnlyImport).ConfigureAwait(false);
+            }
+        }
+
+        /// <inheritdoc />
+        public async Task EnsurePersonItemsAsync(IReadOnlyList<PersonInfo> people, CancellationToken cancellationToken)
+        {
+            var existingNames = GetItemList(new InternalItemsQuery
+                {
+                    IncludeItemTypes = [BaseItemKind.Person]
+                })
+                .Select(item => item.Name)
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            const int BatchSize = 5000;
+            var itemsToCreate = new List<BaseItem>(BatchSize);
+            foreach (var person in people.DistinctBy(person => person.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (string.IsNullOrWhiteSpace(person.Name) || !existingNames.Add(person.Name))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var path = Person.GetPath(person.Name);
+                    var id = GetItemByNameId<Person>(path);
+                    if (GetItemById(id) is Person existingPerson
+                        && !string.Equals(existingPerson.Name, person.Name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var forceCaseInsensitiveId = _configurationManager.Configuration.EnableNormalizedItemByNameIds;
+                        id = GetNewItemIdInternal(path + '\0' + person.Name, typeof(Person), forceCaseInsensitiveId);
+                    }
+
+                    var createdAt = DateTime.UtcNow;
+                    var personItem = new Person
+                    {
+                        Name = person.Name,
+                        Id = id,
+                        DateCreated = createdAt,
+                        DateModified = createdAt,
+                        Path = path,
+                        DateLastSaved = DateTime.UtcNow
+                    };
+                    personItem.PresentationUniqueKey = personItem.CreatePresentationUniqueKey();
+                    itemsToCreate.Add(personItem);
+                    if (itemsToCreate.Count == BatchSize)
+                    {
+                        CreateItems(itemsToCreate.ToArray(), null, cancellationToken);
+                        itemsToCreate.Clear();
+                        await Task.Yield();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to create person {Name}", person.Name);
+                }
+            }
+
+            if (itemsToCreate.Count > 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                CreateItems(itemsToCreate, null, cancellationToken);
             }
         }
 
         public async Task<ItemImageInfo> ConvertImageToLocal(BaseItem item, ItemImageInfo image, int imageIndex, bool removeOnFailure)
         {
+            if (LocalMetadataOnlyImportPolicy.IsEnabledForItem(item, this)
+                && image.Path.Split('|').Any(LocalMetadataOnlyImportPolicy.IsRemoteHttpPath))
+            {
+                _logger.LogDebug("LocalMetadataOnlyImport enabled; skipping remote image {Url}", image.Path);
+                return image;
+            }
+
             foreach (var url in image.Path.Split('|'))
             {
                 try
@@ -3810,7 +3922,7 @@ namespace Emby.Server.Implementations.Library
             }
         }
 
-        private async Task SavePeopleMetadataAsync(IEnumerable<PersonInfo> people, CancellationToken cancellationToken)
+        private async Task SavePeopleMetadataAsync(IEnumerable<PersonInfo> people, CancellationToken cancellationToken, bool localMetadataOnlyImport)
         {
             foreach (var person in people)
             {
@@ -3843,7 +3955,9 @@ namespace Emby.Server.Implementations.Library
                     }
                 }
 
-                if (!string.IsNullOrWhiteSpace(person.ImageUrl) && !personEntity.HasImage(ImageType.Primary))
+                var hasUsableImageUrl = LocalMetadataOnlyImportPolicy.CanImportImagePath(person.ImageUrl, localMetadataOnlyImport);
+
+                if (hasUsableImageUrl && !personEntity.HasImage(ImageType.Primary))
                 {
                     personEntity.SetImage(
                         new ItemImageInfo
@@ -3859,7 +3973,10 @@ namespace Emby.Server.Implementations.Library
 
                 if (saveEntity)
                 {
-                    await RunMetadataSavers(personEntity, itemUpdateType).ConfigureAwait(false);
+                    if (!localMetadataOnlyImport)
+                    {
+                        await RunMetadataSavers(personEntity, itemUpdateType).ConfigureAwait(false);
+                    }
                     personEntity.DateLastSaved = DateTime.UtcNow;
 
                     CreateItems([personEntity], null, CancellationToken.None);

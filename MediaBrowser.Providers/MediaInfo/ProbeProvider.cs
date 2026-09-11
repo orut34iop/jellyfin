@@ -40,6 +40,7 @@ namespace MediaBrowser.Providers.MediaInfo
         ICustomMetadataProvider<Audio>,
         ICustomMetadataProvider<AudioBook>,
         ICustomMetadataProvider<Book>,
+        IMediaInfoProvider,
         IHasOrder,
         IForcedProvider,
         IPreRefreshProvider,

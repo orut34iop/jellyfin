@@ -45,7 +45,7 @@ namespace MediaBrowser.Controller.Library
 
         public LibraryOptions LibraryOptions
         {
-            get => _libraryOptions ??= Parent is null ? new LibraryOptions() : _libraryManager.GetLibraryOptions(Parent);
+            get => _libraryOptions ??= Parent is null || _libraryManager is null ? new LibraryOptions() : _libraryManager.GetLibraryOptions(Parent);
             set => _libraryOptions = value;
         }
 

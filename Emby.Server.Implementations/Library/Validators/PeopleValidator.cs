@@ -53,6 +53,60 @@ public class PeopleValidator
             _logger.LogInformation("Deleted {Amount} credits no item maps to", numOrphaned);
         }
 
+        var libraries = _libraryManager.RootFolder.Children;
+        var localMetadataOnlyImport = libraries.Any(library =>
+            LocalMetadataOnlyImportPolicy.IsEnabled(_libraryManager.GetLibraryOptions(library)));
+        var localPersonLibraryIds = libraries
+            .Where(library =>
+            {
+                var options = _libraryManager.GetLibraryOptions(library);
+                return LocalMetadataOnlyImportPolicy.IsEnabled(options) && options.CreateLocalPersonItems;
+            })
+            .Select(library => library.Id)
+            .ToArray();
+        var localActorLibraryIds = libraries
+            .Where(library =>
+            {
+                var options = _libraryManager.GetLibraryOptions(library);
+                return LocalMetadataOnlyImportPolicy.IsEnabled(options)
+                    && !options.CreateLocalPersonItems
+                    && options.CreateLocalActorItems;
+            })
+            .Select(library => library.Id)
+            .ToArray();
+        var localPersonNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (localPersonLibraryIds.Length > 0)
+        {
+            var personNames = _libraryManager.GetPeopleNames(new InternalPeopleQuery
+            {
+                AncestorIds = localPersonLibraryIds
+            });
+            localPersonNames.UnionWith(personNames);
+        }
+
+        if (localActorLibraryIds.Length > 0)
+        {
+            localPersonNames.UnionWith(_libraryManager.GetPeopleNames(new InternalPeopleQuery(
+                [PersonKind.Actor.ToString()],
+                Array.Empty<string>())
+            {
+                AncestorIds = localActorLibraryIds
+            }));
+        }
+
+        if (localPersonNames.Count > 0)
+        {
+            var peopleToMaterialize = localPersonNames
+                .Select(name => new PersonInfo { Name = name })
+                .ToArray();
+            await _libraryManager.EnsurePersonItemsAsync(peopleToMaterialize, cancellationToken).ConfigureAwait(false);
+            _logger.LogInformation(
+                "Ensured {Count} local person items for {LibraryCount} libraries",
+                peopleToMaterialize.Length,
+                localPersonLibraryIds.Length + localActorLibraryIds.Length);
+        }
+
         var names = _libraryManager.GetPeopleNames(new InternalPeopleQuery());
         var existingPersonIds = _libraryManager.GetItemIds(new InternalItemsQuery
         {
@@ -71,13 +125,31 @@ public class PeopleValidator
 
             try
             {
-                var item = _libraryManager.GetOrCreatePerson(name);
+                if (localPersonNames.Contains(name))
+                {
+                    continue;
+                }
+
+                var item = localMetadataOnlyImport ? _libraryManager.GetPerson(name) : _libraryManager.GetOrCreatePerson(name);
+                if (item is null)
+                {
+                    continue;
+                }
+
                 var isNew = !existingPersonIds.Contains(item.Id);
                 var neverRefreshed = item.DateLastRefreshed == default;
 
                 if (isNew || neverRefreshed)
                 {
-                    await item.RefreshMetadata(cancellationToken).ConfigureAwait(false);
+                    if (localMetadataOnlyImport)
+                    {
+                        await item.RefreshMetadata(PostScanAggregateRefreshOptions.CreateValidationOnly(), cancellationToken).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await item.RefreshMetadata(cancellationToken).ConfigureAwait(false);
+                    }
+
                     refreshed++;
                 }
             }

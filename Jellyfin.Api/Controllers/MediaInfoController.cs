@@ -84,7 +84,10 @@ public class MediaInfoController : BaseJellyfinApiController
             return NotFound();
         }
 
-        return await _mediaInfoHelper.GetPlaybackInfo(item, user, Request).ConfigureAwait(false);
+        var skipMoonfinMediaProbe = ShouldSkipMoonfinMediaProbe(item, user, null, null);
+        var info = await _mediaInfoHelper.GetPlaybackInfo(item, user, Request, allowMediaProbe: !skipMoonfinMediaProbe).ConfigureAwait(false);
+        ApplyMoonfinLocalFilePaths(info, item);
+        return info;
     }
 
     /// <summary>
@@ -174,12 +177,14 @@ public class MediaInfoController : BaseJellyfinApiController
             return NotFound();
         }
 
+        var skipMoonfinMediaProbe = ShouldSkipMoonfinMediaProbe(item, user, mediaSourceId, liveStreamId);
         var info = await _mediaInfoHelper.GetPlaybackInfo(
                 item,
                 user,
                 Request,
                 mediaSourceId,
-                liveStreamId)
+                liveStreamId,
+                !skipMoonfinMediaProbe)
             .ConfigureAwait(false);
 
         if (info.ErrorCode is not null)
@@ -187,7 +192,7 @@ public class MediaInfoController : BaseJellyfinApiController
             return info;
         }
 
-        if (profile is not null)
+        if (profile is not null && !skipMoonfinMediaProbe)
         {
             // set device specific data
             foreach (var mediaSource in info.MediaSources)
@@ -246,7 +251,50 @@ public class MediaInfoController : BaseJellyfinApiController
             }
         }
 
+        ApplyMoonfinLocalFilePaths(info, item);
         return info;
+    }
+
+    private void ApplyMoonfinLocalFilePaths(PlaybackInfoResponse info, BaseItem item)
+    {
+        MoonfinLocalPlaybackHelper.ApplyLocalFilePaths(
+            info,
+            item,
+            mediaSourceItemId => _libraryManager.GetItemById<BaseItem>(mediaSourceItemId),
+            HttpContext.IsLocal(),
+            User.GetClient(),
+            (mediaSource, path) => _logger.LogInformation(
+                "Using local file path for Moonfin playback. ItemId: {ItemId}, MediaSourceId: {MediaSourceId}, Path: {Path}",
+                item.Id,
+                mediaSource.Id,
+                path));
+    }
+
+    private bool ShouldSkipMoonfinMediaProbe(BaseItem item, Jellyfin.Database.Implementations.Entities.User? user, string? mediaSourceId, string? liveStreamId)
+    {
+        if (!string.IsNullOrWhiteSpace(liveStreamId))
+        {
+            return false;
+        }
+
+        var mediaSources = _mediaSourceManager.GetStaticMediaSources(item, true, user);
+        var shouldSkip = MoonfinLocalPlaybackHelper.ShouldSkipMediaProbe(
+            mediaSources,
+            item,
+            mediaSourceItemId => _libraryManager.GetItemById<BaseItem>(mediaSourceItemId),
+            HttpContext.IsLocal(),
+            User.GetClient(),
+            mediaSourceId);
+
+        if (shouldSkip)
+        {
+            _logger.LogInformation(
+                "Skipping media probe for Moonfin local file playback. ItemId: {ItemId}, MediaSourceId: {MediaSourceId}",
+                item.Id,
+                mediaSourceId);
+        }
+
+        return shouldSkip;
     }
 
     /// <summary>

@@ -21,25 +21,13 @@ namespace MediaBrowser.Controller.Providers
         public MetadataRefreshOptions(MetadataRefreshOptions copy)
             : base(copy.DirectoryService)
         {
-            MetadataRefreshMode = copy.MetadataRefreshMode;
-            ForceSave = copy.ForceSave;
-            ReplaceAllMetadata = copy.ReplaceAllMetadata;
-            EnableRemoteContentProbe = copy.EnableRemoteContentProbe;
+            CopyFrom(copy);
+        }
 
-            IsAutomated = copy.IsAutomated;
-            ImageRefreshMode = copy.ImageRefreshMode;
-            ReplaceAllImages = copy.ReplaceAllImages;
-            RegenerateTrickplay = copy.RegenerateTrickplay;
-            ReplaceImages = copy.ReplaceImages;
-            SearchResult = copy.SearchResult;
-            RemoveOldMetadata = copy.RemoveOldMetadata;
-
-            if (copy.RefreshPaths is not null && copy.RefreshPaths.Length > 0)
-            {
-                RefreshPaths ??= Array.Empty<string>();
-
-                RefreshPaths = copy.RefreshPaths.ToArray();
-            }
+        public MetadataRefreshOptions(MetadataRefreshOptions copy, IDirectoryService directoryService)
+            : base(directoryService)
+        {
+            CopyFrom(copy);
         }
 
         /// <summary>
@@ -72,6 +60,29 @@ namespace MediaBrowser.Controller.Providers
             }
 
             return true;
+        }
+
+        private void CopyFrom(MetadataRefreshOptions copy)
+        {
+            MetadataRefreshMode = copy.MetadataRefreshMode;
+            ForceSave = copy.ForceSave;
+            ReplaceAllMetadata = copy.ReplaceAllMetadata;
+            EnableRemoteContentProbe = copy.EnableRemoteContentProbe;
+
+            IsAutomated = copy.IsAutomated;
+            ImageRefreshMode = copy.ImageRefreshMode;
+            ReplaceAllImages = copy.ReplaceAllImages;
+            RegenerateTrickplay = copy.RegenerateTrickplay;
+            ReplaceImages = copy.ReplaceImages;
+            SearchResult = copy.SearchResult;
+            RemoveOldMetadata = copy.RemoveOldMetadata;
+
+            if (copy.RefreshPaths is not null && copy.RefreshPaths.Length > 0)
+            {
+                RefreshPaths ??= Array.Empty<string>();
+
+                RefreshPaths = copy.RefreshPaths.ToArray();
+            }
         }
     }
 }

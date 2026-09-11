@@ -154,6 +154,15 @@ namespace MediaBrowser.Controller.Providers
         IEnumerable<IMetadataProvider<T>> GetMetadataProviders<T>(BaseItem item, LibraryOptions libraryOptions, bool includeDisabled)
             where T : BaseItem;
 
+        /// <summary>Gets providers for the requested refresh policy.</summary>
+        /// <param name="item">The item.</param>
+        /// <param name="libraryOptions">Library options.</param>
+        /// <param name="refreshOptions">The metadata refresh options.</param>
+        /// <typeparam name="T">The type of metadata provider.</typeparam>
+        /// <returns>The metadata providers.</returns>
+        IEnumerable<IMetadataProvider<T>> GetMetadataProviders<T>(BaseItem item, LibraryOptions libraryOptions, MetadataRefreshOptions refreshOptions)
+            where T : BaseItem;
+
         /// <summary>
         /// Gets the metadata savers for the provided item.
         /// </summary>

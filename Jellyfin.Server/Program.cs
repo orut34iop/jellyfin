@@ -273,9 +273,11 @@ namespace Jellyfin.Server
                 {
                     _logger.LogInformation("Optimizing the database... This might take a while");
 
-                    // Deliberately untimed: a truncated optimization leaves the statistics incomplete.
+                    // Bound shutdown optimization so a locked database cannot indefinitely block exit.
                     var databaseProvider = appHost.ServiceProvider.GetRequiredService<IJellyfinDatabaseProvider>();
-                    await databaseProvider.RunShutdownTask(CancellationToken.None).ConfigureAwait(false);
+                    using var shutdownSource = new CancellationTokenSource();
+                    shutdownSource.CancelAfter(TimeSpan.FromSeconds(60));
+                    await databaseProvider.RunShutdownTask(shutdownSource.Token).ConfigureAwait(false);
                 }
 
                 _appHost = null;

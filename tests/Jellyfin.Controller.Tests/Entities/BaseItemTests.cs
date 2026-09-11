@@ -644,4 +644,46 @@ public class BaseItemTests
 
         Assert.Equal([primary.Id, alt1.Id, alt2.Id], ids);
     }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public async Task RefreshMetadata_LocalMetadataOnlyImport_SkipsResolvingVideoSymlinksUnlessRemoteContentProbe(
+        bool enableRemoteContentProbe,
+        bool expectedSkipResolvingVideoSymlinks)
+    {
+        var video = new Video
+        {
+            Path = "/Movies/Ted/Ted.mp4"
+        };
+
+        BaseItem.FileSystem = Mock.Of<IFileSystem>();
+
+        var libraryManager = new Mock<ILibraryManager>();
+        libraryManager.Setup(i => i.GetLibraryOptions(video))
+            .Returns(new LibraryOptions { LocalMetadataOnlyImport = true });
+        BaseItem.LibraryManager = libraryManager.Object;
+
+        var providerManager = new Mock<IProviderManager>();
+        MetadataRefreshOptions? capturedOptions = null;
+        providerManager.Setup(
+                i => i.RefreshSingleItem(
+                    video,
+                    It.IsAny<MetadataRefreshOptions>(),
+                    It.IsAny<CancellationToken>()))
+            .Callback<BaseItem, MetadataRefreshOptions, CancellationToken>((_, options, _) => capturedOptions = options)
+            .ReturnsAsync(ItemUpdateType.None);
+        BaseItem.ProviderManager = providerManager.Object;
+
+        var originalDirectoryService = new DirectoryService(Mock.Of<IFileSystem>());
+        var refreshOptions = new MetadataRefreshOptions(originalDirectoryService)
+        {
+            EnableRemoteContentProbe = enableRemoteContentProbe
+        };
+
+        await video.RefreshMetadata(refreshOptions, CancellationToken.None);
+
+        var directoryService = Assert.IsType<DirectoryService>(capturedOptions!.DirectoryService);
+        Assert.Equal(expectedSkipResolvingVideoSymlinks, directoryService.SkipResolvingVideoSymlinks);
+    }
 }

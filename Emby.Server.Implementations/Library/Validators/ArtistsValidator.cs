@@ -57,6 +57,14 @@ public class ArtistsValidator
         }).ToHashSet();
 
         var existingArtists = _libraryManager.GetArtists(names);
+        var localMetadataOnlyImport = PostScanAggregateRefreshOptions.HasLocalMetadataOnlyImportLibrary(
+            _libraryManager.RootFolder.Children,
+            _libraryManager.GetLibraryOptions);
+
+        if (localMetadataOnlyImport)
+        {
+            _logger.LogDebug("LocalMetadataOnlyImport enabled; validating artist metadata without remote refresh");
+        }
 
         var numComplete = 0;
         var count = names.Count;
@@ -88,7 +96,14 @@ public class ArtistsValidator
 
                     if (isNew || neverRefreshed)
                     {
-                        await item.RefreshMetadata(cancellationToken).ConfigureAwait(false);
+                        if (localMetadataOnlyImport)
+                        {
+                            await item.RefreshMetadata(PostScanAggregateRefreshOptions.CreateValidationOnly(), cancellationToken).ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            await item.RefreshMetadata(cancellationToken).ConfigureAwait(false);
+                        }
                         refreshed++;
                     }
                 }

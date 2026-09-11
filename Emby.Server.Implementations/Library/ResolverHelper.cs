@@ -116,7 +116,11 @@ namespace Emby.Server.Implementations.Library
                 }
                 else
                 {
-                    var fileData = fileSystem.GetFileSystemInfo(item.Path);
+                    var skipResolvingVideoSymlink = LocalMetadataOnlyImportPolicy.IsEnabled(args.LibraryOptions)
+                        && LocalMetadataOnlyImportPolicy.IsVideoLikePath(item.Path);
+                    var fileData = skipResolvingVideoSymlink
+                        ? fileSystem.GetFileSystemInfo(item.Path, true)
+                        : fileSystem.GetFileSystemInfo(item.Path);
 
                     if (fileData.Exists)
                     {

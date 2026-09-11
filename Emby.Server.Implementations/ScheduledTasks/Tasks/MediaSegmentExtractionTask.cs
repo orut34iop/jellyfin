@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
@@ -59,6 +60,15 @@ public class MediaSegmentExtractionTask : IScheduledTask
         progress.Report(0);
 
         var pagesize = 100;
+        var libraries = _libraryManager.RootFolder.Children
+            .Where(library => !LocalMetadataOnlyImportPolicy.IsEnabled(_libraryManager.GetLibraryOptions(library)))
+            .ToArray();
+
+        if (libraries.Length == 0)
+        {
+            progress.Report(100);
+            return;
+        }
 
         var query = new InternalItemsQuery
         {
@@ -72,37 +82,60 @@ public class MediaSegmentExtractionTask : IScheduledTask
             Limit = pagesize
         };
 
-        var numberOfVideos = _libraryManager.GetCount(query);
-
-        var startIndex = 0;
-        var numComplete = 0;
-
-        while (startIndex < numberOfVideos)
+        var numberOfVideos = libraries.Sum(library =>
         {
-            query.StartIndex = startIndex;
+            query.Parent = library;
+            return _libraryManager.GetCount(query);
+        });
 
-            var baseItems = _libraryManager.GetItemList(query);
-            var currentPageCount = baseItems.Count;
-            // TODO parallelize with Parallel.ForEach?
-            for (var i = 0; i < currentPageCount; i++)
+        if (numberOfVideos == 0)
+        {
+            progress.Report(100);
+            return;
+        }
+
+        var numComplete = 0;
+        foreach (var library in libraries)
+        {
+            query.Parent = library;
+            query.StartIndex = 0;
+
+            while (true)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                var item = baseItems[i];
-                // Only local files supported
-                if (item.IsFileProtocol && File.Exists(item.Path))
+                var baseItems = _libraryManager.GetItemList(query);
+                var currentPageCount = baseItems.Count;
+                if (currentPageCount == 0)
                 {
-                    var libraryOptions = _libraryManager.GetLibraryOptions(item);
-                    await _mediaSegmentManager.RunSegmentPluginProviders(item, libraryOptions, false, cancellationToken).ConfigureAwait(false);
+                    break;
                 }
 
-                // Update progress
-                numComplete++;
-                double percent = (double)numComplete / numberOfVideos;
-                progress.Report(100 * percent);
-            }
+                // TODO parallelize with Parallel.ForEach?
+                for (var i = 0; i < currentPageCount; i++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
 
-            startIndex += pagesize;
+                    var item = baseItems[i];
+                    var libraryOptions = _libraryManager.GetLibraryOptions(item);
+
+                    // Only local files supported
+                    if (item.IsFileProtocol && File.Exists(item.Path))
+                    {
+                        await _mediaSegmentManager.RunSegmentPluginProviders(item, libraryOptions, false, cancellationToken).ConfigureAwait(false);
+                    }
+
+                    // Update progress
+                    numComplete++;
+                    double percent = (double)numComplete / numberOfVideos;
+                    progress.Report(100 * percent);
+                }
+
+                if (currentPageCount < pagesize)
+                {
+                    break;
+                }
+
+                query.StartIndex += pagesize;
+            }
         }
 
         progress.Report(100);

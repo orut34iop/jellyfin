@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Jellyfin.Api.Extensions;
 using MediaBrowser.Controller.MediaEncoding;
 using MediaBrowser.Controller.Streaming;
+using MediaBrowser.Model.IO;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Net.Http.Headers;
@@ -106,6 +107,20 @@ public static class FileStreamResponseHelpers
         string path,
         string contentType)
     {
+        // Symlinked media files can trigger sendfile fallback length accounting issues on some filesystems.
+        // Stream them directly to avoid relying on ASP.NET's sendfile path.
+        if (File.Exists(path) && (File.GetAttributes(path) & FileAttributes.ReparsePoint) == FileAttributes.ReparsePoint)
+        {
+            var fileStream = new FileStream(
+                path,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                IODefaults.FileStreamBufferSize,
+                FileOptions.Asynchronous | FileOptions.SequentialScan);
+            return new FileStreamResult(fileStream, contentType) { EnableRangeProcessing = true };
+        }
+
         return new PhysicalFileResult(path, contentType) { EnableRangeProcessing = true };
     }
 

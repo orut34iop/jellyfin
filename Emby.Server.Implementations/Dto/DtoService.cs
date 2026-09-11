@@ -818,6 +818,8 @@ namespace Emby.Server.Implementations.Dto
             // front and passes them in, avoiding one GetPeople query per item. Fall back to the
             // per-item query for the single item path where no batch is available.
             var source = prefetchedPeople ?? _libraryManager.GetPeople(item);
+            var libraryOptions = _libraryManager.GetLibraryOptions(item);
+            var includeLocalMetadataOnlyPeople = LocalMetadataOnlyImportPolicy.IsEnabled(libraryOptions);
 
             // Ordering by person type to ensure actors and artists are at the front.
             // This is taking advantage of the fact that they both begin with A
@@ -861,7 +863,15 @@ namespace Emby.Server.Implementations.Dto
 
             var list = new List<BaseItemPerson>();
 
-            Dictionary<string, Person> dictionary = people.Select(p => p.Name)
+            var peopleWithItems = includeLocalMetadataOnlyPeople
+                ? libraryOptions.CreateLocalPersonItems
+                    ? people
+                    : libraryOptions.CreateLocalActorItems
+                        ? people.Where(person => person.Type == PersonKind.Actor)
+                        : []
+                : people;
+
+            Dictionary<string, Person> dictionary = peopleWithItems.Select(p => p.Name)
                 .Distinct(StringComparer.OrdinalIgnoreCase).Select(c =>
                 {
                     try
@@ -913,6 +923,10 @@ namespace Emby.Server.Implementations.Dto
                         }
                     }
 
+                    list.Add(baseItemPerson);
+                }
+                else if (includeLocalMetadataOnlyPeople)
+                {
                     list.Add(baseItemPerson);
                 }
             }

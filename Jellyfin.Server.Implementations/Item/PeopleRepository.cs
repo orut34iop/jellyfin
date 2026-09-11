@@ -33,6 +33,29 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
     public QueryResult<PersonInfo> GetPeople(InternalPeopleQuery filter)
     {
         using var context = _dbProvider.CreateDbContext();
+        if (!filter.ItemId.IsEmpty())
+        {
+            var mappings = TranslateItemQuery(context.PeopleBaseItemMap.AsNoTracking().Where(m => m.ItemId == filter.ItemId), context, filter);
+            var totalCount = filter.EnableTotalRecordCount ? mappings.Count() : 0;
+            mappings = mappings.Include(m => m.People).OrderBy(m => m.ListOrder).ThenBy(m => m.People.PersonType).ThenBy(m => m.People.Name);
+            if (filter.StartIndex is > 0)
+            {
+                mappings = mappings.Skip(filter.StartIndex.Value);
+            }
+
+            if (filter.Limit > 0)
+            {
+                mappings = mappings.Take(filter.Limit);
+            }
+
+            return new QueryResult<PersonInfo>
+            {
+                StartIndex = filter.StartIndex ?? 0,
+                TotalRecordCount = totalCount,
+                Items = mappings.AsEnumerable().Select(m => Map(m.People, m)).ToArray()
+            };
+        }
+
         var dbQuery = TranslateQuery(context.Peoples.AsNoTracking(), context, filter);
         int? distinctNameCount = null;
 
@@ -90,10 +113,18 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
     {
         using var context = _dbProvider.CreateDbContext();
 
-        IQueryable<string> dbQuery = TranslateQuery(context.Peoples.AsNoTracking(), context, filter)
-            .Select(e => e.Name)
-            .Distinct()
-            .OrderBy(e => e);
+        IQueryable<string> dbQuery;
+        if (filter.AncestorIds.Length > 0)
+        {
+            var mappings = context.AncestorIds.AsNoTracking()
+                .Where(a => filter.AncestorIds.Contains(a.ParentItemId))
+                .Join(context.PeopleBaseItemMap.AsNoTracking(), a => a.ItemId, m => m.ItemId, (_, m) => m);
+            dbQuery = TranslateItemQuery(mappings, context, filter).Select(m => m.People.Name).Distinct().OrderBy(n => n);
+        }
+        else
+        {
+            dbQuery = TranslateQuery(context.Peoples.AsNoTracking(), context, filter).Select(e => e.Name).Distinct().OrderBy(n => n);
+        }
 
         if (filter.StartIndex.HasValue && filter.StartIndex > 0)
         {
@@ -331,6 +362,7 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
         var personInfo = new PersonInfo()
         {
             Id = people.Id,
+            ItemId = mapping?.ItemId ?? Guid.Empty,
             Name = people.Name,
             Role = mapping?.Role,
             SortOrder = mapping?.SortOrder
@@ -390,6 +422,12 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
                 .Contains(e.Id));
         }
 
+        if (filter.AncestorIds.Length > 0)
+        {
+            query = query.Where(e => e.BaseItems!.Any(mapping => context.AncestorIds.Any(ancestor =>
+                filter.AncestorIds.Contains(ancestor.ParentItemId) && ancestor.ItemId == mapping.ItemId)));
+        }
+
         if (filter.ParentId != null)
         {
             query = query.Where(e => e.BaseItems!.Any(w => context.AncestorIds.Any(i => i.ParentItemId == filter.ParentId && i.ItemId == w.ItemId)));
@@ -444,6 +482,18 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
         }
 
         return query;
+    }
+
+    private IQueryable<PeopleBaseItemMap> TranslateItemQuery(IQueryable<PeopleBaseItemMap> mappings, JellyfinDbContext context, InternalPeopleQuery filter)
+    {
+        var people = TranslateQuery(context.Peoples.AsNoTracking(), context, filter);
+        mappings = mappings.Where(m => people.Any(p => p.Id == m.PeopleId));
+        if (filter.MaxListOrder.HasValue)
+        {
+            mappings = mappings.Where(m => m.ListOrder <= filter.MaxListOrder.Value);
+        }
+
+        return mappings;
     }
 
     private bool IsAlphaNumeric(string str)

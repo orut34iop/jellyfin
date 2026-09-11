@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Emby.Naming.Common;
 using Emby.Naming.Video;
@@ -88,5 +89,42 @@ public class MovieResolverTests
         Assert.Single(result.Items);
         Assert.All(result.Items, item => Assert.IsType<Movie>(item));
         Assert.Single(((Video)result.Items[0]).LocalAlternateVersions);
+    }
+
+    [Fact]
+    public void ResolveMultiple_GivenEpisodeUnderSeason_AssignsSeriesAndSeasonIds()
+    {
+        var seriesId = Guid.NewGuid();
+        var seasonId = Guid.NewGuid();
+        var seriesName = "Test Series";
+        var seasonName = "Season 1";
+        var season = new Season
+        {
+            Id = seasonId,
+            Name = seasonName,
+            IndexNumber = 1,
+            SeriesId = seriesId,
+            SeriesName = seriesName
+        };
+
+        var movieResolver = new MovieResolver(Mock.Of<IImageProcessor>(), Mock.Of<ILogger<MovieResolver>>(), _namingOptions, Mock.Of<IDirectoryService>(), _videoListResolver);
+        var result = movieResolver.ResolveMultiple(
+            season,
+            [
+                new FileSystemMetadata
+                {
+                    FullName = "/tv/Test Series/Season 1/Test Series S01E01.mkv",
+                    Name = "Test Series S01E01.mkv"
+                }
+            ],
+            CollectionType.tvshows,
+            Mock.Of<IDirectoryService>());
+
+        var episode = Assert.IsType<Episode>(Assert.Single(result.Items));
+        Assert.Equal(seriesId, episode.SeriesId);
+        Assert.Equal(seriesName, episode.SeriesName);
+        Assert.Equal(seasonId, episode.SeasonId);
+        Assert.Equal(seasonName, episode.SeasonName);
+        Assert.Equal(1, episode.ParentIndexNumber);
     }
 }

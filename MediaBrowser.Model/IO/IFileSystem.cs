@@ -50,6 +50,14 @@ namespace MediaBrowser.Model.IO
         FileSystemMetadata GetFileSystemInfo(string path);
 
         /// <summary>
+        /// Returns a <see cref="FileSystemMetadata" /> object for the specified file or directory path.
+        /// </summary>
+        /// <param name="path">A path to a file or directory.</param>
+        /// <param name="skipResolvingVideoSymlinks">Whether video symlinks should be returned using link metadata instead of resolving their targets.</param>
+        /// <returns>A <see cref="FileSystemMetadata" /> object.</returns>
+        FileSystemMetadata GetFileSystemInfo(string path, bool skipResolvingVideoSymlinks);
+
+        /// <summary>
         /// Returns a <see cref="FileSystemMetadata" /> object for the specified file path.
         /// </summary>
         /// <param name="path">A path to a file.</param>
@@ -194,6 +202,15 @@ namespace MediaBrowser.Model.IO
         /// <param name="recursive">if set to <c>true</c> [recursive].</param>
         /// <returns>IEnumerable&lt;FileSystemMetadata&gt;.</returns>
         IEnumerable<FileSystemMetadata> GetFileSystemEntries(string path, bool recursive = false);
+
+        /// <summary>
+        /// Gets the file system entries.
+        /// </summary>
+        /// <param name="path">The path.</param>
+        /// <param name="recursive">if set to <c>true</c> [recursive].</param>
+        /// <param name="skipResolvingVideoSymlinks">Whether video symlinks should be returned using link metadata instead of resolving their targets.</param>
+        /// <returns>IEnumerable&lt;FileSystemMetadata&gt;.</returns>
+        IEnumerable<FileSystemMetadata> GetFileSystemEntries(string path, bool recursive, bool skipResolvingVideoSymlinks);
 
         /// <summary>
         /// Gets the directory paths.
