@@ -388,7 +388,10 @@ namespace MediaBrowser.Providers.Manager
                         }
                     }
 
-                    if (item is Video video)
+                    // Local-only imports deliberately skip probing and generated video data. Removing
+                    // extracted data here for every changed symlink just adds a costly filesystem and
+                    // database pass, and can make a large initial import appear stalled.
+                    if (item is Video video && !LocalMetadataOnlyImportPolicy.IsEnabled(libraryOptions))
                     {
                         Logger.LogInformation("File changed, pruning extracted data: {Path}", item.Path);
                         ExternalDataManager.DeleteExternalItemDataAsync(video, CancellationToken.None).GetAwaiter().GetResult();
