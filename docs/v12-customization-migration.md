@@ -30,6 +30,8 @@
 
 已撤销的字幕取消修改按最终差异处理，没有重新引入。历史文档保留原版事实；当前构建与运行说明以本文件为准。
 
+最终浏览器验收发现 V12 SDK 仅接受纯数字版本比较，已在 Web 连接检查中识别本 fork 的 14 位构建时间后缀，使用正式版本号进行兼容比较，仍保留完整版本用于显示。新增 9 项兼容检查回归测试，覆盖正式版本、构建时间、过旧版本及异常输入。
+
 ## V12 安装隔离
 
 当前 V12 应用使用 `~/Library/Application Support/jellyfin-v12` 和本机端口 `18096`。原 V10 应用与数据没有被升级，尚未将生产媒体库导入 V12。安装采用自包含服务端、构建后的 Web 与已有 Jellyfin FFmpeg 7.1.4，启动脚本通过明确参数使用独立数据目录。
@@ -38,7 +40,7 @@
 
 详细构建与测试日志位于项目旁的 `../migration-audit`。
 
-- Web：165 项测试通过，生产构建、TypeScript、变更文件 ESLint 均通过；仅有 webpack 资源体积提示。
+- Web：174 项测试通过，生产构建、TypeScript、变更文件 ESLint 均通过；仅有 webpack 资源体积提示。
 - Server Implementations：850 项通过，5 项因平台/测试挂载条件跳过。
 - API：155 项通过。
 - Controller：205 项通过。
@@ -62,3 +64,9 @@ cd /Users/wiz/dev/Jellyfin12/Jellyfin
 ## V12 官方符号链接改进
 
 官方 PR [#16965](https://github.com/jellyfin/jellyfin/pull/16965)，提交 `c7111b7570`，2026-06-01 合入并包含于 v12.0，将符号链接目标解析从 BaseItem.GetVersionInfo 移至播放/下载路径，避免浏览媒体库时不必要地唤醒目标磁盘。这是通用逻辑，也适用于 macOS。它不等同于定制的扫描占位、禁止媒体探测和同机 Moonfin 返回原始链接路径，因此两者都保留。
+
+## 最终安装验收
+
+2026-09-12 安装并启动 `/Applications/Jellyfin V12.app`，`/System/Info/Public` 返回 `12.0.0-20260912000255`，`/health` 返回 Healthy，Web 返回 HTTP 200，浏览器初始化向导正常显示。OpenAPI 包含 LocalMetadataOnlyImport、CreateLocalPersonItems、CreateLocalActorItems 三个定制配置字段。Web 版本时间戳兼容修复已包含在安装产物中。
+
+当前验证包含源码构建、回归测试、应用安装、启动和初始页面；尚未把 V10 的真实媒体库数据升级到 V12，也未进行真实 Moonfin 客户端播放验收。
