@@ -1419,6 +1419,8 @@ namespace Emby.Server.Implementations.Library
             IsScanRunning = true;
             ClearIgnoreRuleCache();
             LibraryMonitor.Stop();
+            var scanStart = Stopwatch.GetTimestamp();
+            _logger.LogInformation("Media library scan started");
 
             try
             {
@@ -1426,6 +1428,12 @@ namespace Emby.Server.Implementations.Library
             }
             finally
             {
+                var elapsed = Stopwatch.GetElapsedTime(scanStart);
+                _logger.LogInformation(
+                    "Media library scan {Status} after {Minutes} minute(s) and {Seconds} seconds",
+                    cancellationToken.IsCancellationRequested ? "cancelled" : "stopped",
+                    Math.Truncate(elapsed.TotalMinutes),
+                    elapsed.Seconds);
                 ClearIgnoreRuleCache();
                 LibraryMonitor.Start();
                 IsScanRunning = false;
@@ -1491,20 +1499,48 @@ namespace Emby.Server.Implementations.Library
         {
             _logger.LogInformation("Validating media library");
 
-            await ValidateTopLibraryFolders(cancellationToken).ConfigureAwait(false);
+            var scanStart = Stopwatch.GetTimestamp();
+            var lastProgressLog = scanStart;
+            var lastLoggedProgress = -1d;
 
-            var innerProgress = new Progress<double>(pct => progress.Report(pct * 0.96));
+            void ReportScanProgress(double percent, string phase)
+            {
+                progress.Report(percent);
+
+                var now = Stopwatch.GetTimestamp();
+                var elapsed = Stopwatch.GetElapsedTime(scanStart);
+                if (percent >= 100
+                    || percent >= lastLoggedProgress + 1
+                    || Stopwatch.GetElapsedTime(lastProgressLog).TotalSeconds >= 60)
+                {
+                    _logger.LogInformation(
+                        "Media library scan progress {Progress:F1}% phase {Phase}; elapsed {Minutes} minute(s) {Seconds} seconds",
+                        percent,
+                        phase,
+                        Math.Truncate(elapsed.TotalMinutes),
+                        elapsed.Seconds);
+                    lastLoggedProgress = percent;
+                    lastProgressLog = now;
+                }
+            }
+
+            _logger.LogInformation("Media library scan phase started: validating library folders");
+            await ValidateTopLibraryFolders(cancellationToken).ConfigureAwait(false);
+            _logger.LogInformation("Media library scan phase completed: validating library folders");
+
+            var innerProgress = new Progress<double>(pct => ReportScanProgress(pct * 0.96, "library validation"));
 
             // Validate the entire media library
             await RootFolder.ValidateChildren(innerProgress, new MetadataRefreshOptions(new DirectoryService(_fileSystem)), recursive: true, cancellationToken: cancellationToken).ConfigureAwait(false);
 
-            progress.Report(96);
+            ReportScanProgress(96, "library validation completed");
+            _logger.LogInformation("Media library scan phase completed: library validation");
 
-            innerProgress = new Progress<double>(pct => progress.Report(96 + (pct * .04)));
+            innerProgress = new Progress<double>(pct => ReportScanProgress(96 + (pct * .04), "post-scan tasks"));
 
             await RunPostScanTasks(innerProgress, cancellationToken).ConfigureAwait(false);
 
-            progress.Report(100);
+            ReportScanProgress(100, "post-scan tasks completed");
         }
 
         /// <summary>
