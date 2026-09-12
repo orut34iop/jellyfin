@@ -18,11 +18,24 @@ public interface IJellyfinDatabaseProvider
     IDbContextFactory<JellyfinDbContext>? DbContextFactory { get; set; }
 
     /// <summary>
+    /// Gets a value indicating whether structural failure requires manual recovery instead of automatic rollback.
+    /// </summary>
+    bool RequiresRecovery => false;
+
+    /// <summary>
     /// Initialises jellyfins EFCore database access.
     /// </summary>
     /// <param name="options">The EFCore database options.</param>
     /// <param name="databaseConfiguration">The Jellyfin database options.</param>
     void Initialise(DbContextOptionsBuilder options, DatabaseConfigurationOptions databaseConfiguration);
+
+    /// <summary>
+    /// Observes failures that can occur while consuming a database command's results.
+    /// </summary>
+    /// <param name="exception">The database operation failure.</param>
+    void OnDatabaseError(Exception exception)
+    {
+    }
 
     /// <summary>
     /// Will be invoked when EFCore wants to build its model.

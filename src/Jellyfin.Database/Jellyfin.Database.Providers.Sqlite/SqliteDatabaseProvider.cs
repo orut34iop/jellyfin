@@ -11,6 +11,7 @@ using MediaBrowser.Common.Configuration;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Database.Providers.Sqlite;
@@ -24,24 +25,33 @@ public sealed class SqliteDatabaseProvider : IJellyfinDatabaseProvider
     private const string BackupFolderName = "SQLiteBackups";
     private readonly IApplicationPaths _applicationPaths;
     private readonly ILogger<SqliteDatabaseProvider> _logger;
+    private readonly SqliteCorruptionGuard _corruptionGuard;
+    private string? _databasePath;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SqliteDatabaseProvider"/> class.
     /// </summary>
     /// <param name="applicationPaths">Service to construct the fallback when the old data path configuration is used.</param>
     /// <param name="logger">A logger.</param>
-    public SqliteDatabaseProvider(IApplicationPaths applicationPaths, ILogger<SqliteDatabaseProvider> logger)
+    /// <param name="applicationLifetime">The running host, when available.</param>
+    public SqliteDatabaseProvider(IApplicationPaths applicationPaths, ILogger<SqliteDatabaseProvider> logger, IHostApplicationLifetime? applicationLifetime = null)
     {
         _applicationPaths = applicationPaths;
         _logger = logger;
+        _corruptionGuard = new SqliteCorruptionGuard(logger, applicationLifetime);
     }
 
     /// <inheritdoc/>
     public IDbContextFactory<JellyfinDbContext>? DbContextFactory { get; set; }
 
     /// <inheritdoc/>
+    public bool RequiresRecovery => _corruptionGuard.IsCorrupted;
+
+    /// <inheritdoc/>
     public void Initialise(DbContextOptionsBuilder options, DatabaseConfigurationOptions databaseConfiguration)
     {
+        _corruptionGuard.Initialize(Path.Combine(_applicationPaths.DataPath, "database-corruption.txt"));
+
         static T? GetOption<T>(ICollection<CustomDatabaseOption>? options, string key, Func<string, T> converter, Func<T>? defaultValue = null)
         {
             if (options is null)
@@ -73,6 +83,7 @@ public sealed class SqliteDatabaseProvider : IJellyfinDatabaseProvider
         };
 
         var connectionString = sqliteConnectionBuilder.ToString();
+        _databasePath = sqliteConnectionBuilder.DataSource;
 
         // Log SQLite connection parameters
         _logger.LogInformation("SQLite connection string: {ConnectionString}", connectionString);
@@ -85,14 +96,15 @@ public sealed class SqliteDatabaseProvider : IJellyfinDatabaseProvider
             .ConfigureWarnings(warnings =>
                 warnings.Ignore(RelationalEventId.NonTransactionalMigrationOperationWarning)
                     .Ignore(RelationalEventId.MultipleCollectionIncludeWarning))
-            .AddInterceptors(new PragmaConnectionInterceptor(
+            .AddInterceptors(_corruptionGuard, new PragmaConnectionInterceptor(
                 _logger,
                 GetOption<int?>(customOptions, "cacheSize", e => int.Parse(e, CultureInfo.InvariantCulture)),
                 GetOption(customOptions, "lockingmode", e => e, () => "NORMAL")!,
                 GetOption(customOptions, "journalsizelimit", int.Parse, () => 134_217_728),
                 GetOption(customOptions, "tempstoremode", int.Parse, () => 2),
                 GetOption(customOptions, "syncmode", int.Parse, () => 1),
-                customOptions?.Where(e => e.Key.StartsWith("#PRAGMA:", StringComparison.OrdinalIgnoreCase)).ToDictionary(e => e.Key["#PRAGMA:".Length..], e => e.Value) ?? []));
+                customOptions?.Where(e => e.Key.StartsWith("#PRAGMA:", StringComparison.OrdinalIgnoreCase)).ToDictionary(e => e.Key["#PRAGMA:".Length..], e => e.Value) ?? [],
+                _corruptionGuard));
 
         var enableSensitiveDataLogging = GetOption(customOptions, "EnableSensitiveDataLogging", e => e.Equals(bool.TrueString, StringComparison.OrdinalIgnoreCase), () => false);
         if (enableSensitiveDataLogging)
@@ -109,6 +121,9 @@ public sealed class SqliteDatabaseProvider : IJellyfinDatabaseProvider
     }
 
     /// <inheritdoc/>
+    public void OnDatabaseError(Exception exception) => _corruptionGuard.ObserveFailure(exception);
+
+    /// <inheritdoc/>
     public void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.SetDefaultDateTimeKind(DateTimeKind.Utc);
@@ -117,6 +132,13 @@ public sealed class SqliteDatabaseProvider : IJellyfinDatabaseProvider
     /// <inheritdoc/>
     public async Task RunShutdownTask(CancellationToken cancellationToken)
     {
+        if (_corruptionGuard.IsCorrupted)
+        {
+            _logger.LogWarning("Skipping database shutdown maintenance after corruption was reported.");
+            SqliteConnection.ClearAllPools();
+            return;
+        }
+
         // Run before disposing the application
         try
         {
@@ -157,34 +179,98 @@ public sealed class SqliteDatabaseProvider : IJellyfinDatabaseProvider
     }
 
     /// <inheritdoc />
-    public Task<string> MigrationBackupFast(CancellationToken cancellationToken)
+    public async Task<string> MigrationBackupFast(CancellationToken cancellationToken)
     {
-        var key = DateTime.UtcNow.ToString("yyyyMMddhhmmss", CultureInfo.InvariantCulture);
-        var path = Path.Combine(_applicationPaths.DataPath, "jellyfin.db");
+        cancellationToken.ThrowIfCancellationRequested();
+        _corruptionGuard.ThrowIfCorrupted();
+        var key = DateTime.UtcNow.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture) + "_" + Guid.NewGuid().ToString("N");
+        var path = _databasePath ?? Path.Combine(_applicationPaths.DataPath, "jellyfin.db");
         var backupFile = Path.Combine(_applicationPaths.DataPath, BackupFolderName);
         Directory.CreateDirectory(backupFile);
 
         backupFile = Path.Combine(backupFile, $"{key}_jellyfin.db");
-        File.Copy(path, backupFile);
-        return Task.FromResult(key);
+        // Copy the logical database, including committed WAL frames. File.Copy only
+        // captures the main file and can silently omit recent transactions.
+        using var source = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = path,
+            Mode = SqliteOpenMode.ReadOnly,
+            Cache = SqliteCacheMode.Private,
+            Pooling = false
+        }.ToString());
+        using var destination = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = backupFile,
+            Cache = SqliteCacheMode.Private,
+            Pooling = false
+        }.ToString());
+        await source.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await destination.OpenAsync(cancellationToken).ConfigureAwait(false);
+        source.BackupDatabase(destination);
+        cancellationToken.ThrowIfCancellationRequested();
+        return key;
     }
 
     /// <inheritdoc />
-    public Task RestoreBackupFast(string key, CancellationToken cancellationToken)
+    public async Task RestoreBackupFast(string key, CancellationToken cancellationToken)
     {
-        // ensure there are absolutely no dangling Sqlite connections.
+        cancellationToken.ThrowIfCancellationRequested();
+        // Structural corruption needs manual recovery; never overwrite the evidence automatically.
+        _corruptionGuard.ThrowIfCorrupted();
         SqliteConnection.ClearAllPools();
-        var path = Path.Combine(_applicationPaths.DataPath, "jellyfin.db");
+        var path = _databasePath ?? Path.Combine(_applicationPaths.DataPath, "jellyfin.db");
         var backupFile = Path.Combine(_applicationPaths.DataPath, BackupFolderName, $"{key}_jellyfin.db");
 
         if (!File.Exists(backupFile))
         {
             _logger.LogCritical("Tried to restore a backup that does not exist: {Key}", key);
-            return Task.CompletedTask;
+            throw new FileNotFoundException("The database backup does not exist.", backupFile);
         }
 
-        File.Copy(backupFile, path, true);
-        return Task.CompletedTask;
+        using var source = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = backupFile,
+            Mode = SqliteOpenMode.ReadOnly,
+            Cache = SqliteCacheMode.Private,
+            Pooling = false
+        }.ToString());
+        await source.OpenAsync(cancellationToken).ConfigureAwait(false);
+        using (var check = source.CreateCommand())
+        {
+            check.CommandText = "PRAGMA integrity_check";
+            using (var results = await check.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (!await results.ReadAsync(cancellationToken).ConfigureAwait(false)
+                    || results.GetString(0) != "ok"
+                    || await results.ReadAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    throw new InvalidDataException("Database backup failed integrity_check; restore refused.");
+                }
+            }
+
+            check.CommandText = "PRAGMA foreign_key_check";
+            using var foreignKeys = await check.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+            if (await foreignKeys.ReadAsync(cancellationToken).ConfigureAwait(false))
+            {
+                throw new InvalidDataException("Database backup failed foreign_key_check; restore refused.");
+            }
+        }
+
+        // Retain the pre-rollback state, even when migration rollback succeeds.
+        var retainedKey = await MigrationBackupFast(cancellationToken).ConfigureAwait(false);
+        _logger.LogWarning("Retained database before migration rollback as {Key}", retainedKey);
+        using var destination = new SqliteConnection(new SqliteConnectionStringBuilder
+        {
+            DataSource = path,
+            Mode = SqliteOpenMode.ReadWrite,
+            Cache = SqliteCacheMode.Private,
+            Pooling = false
+        }.ToString());
+        await destination.OpenAsync(cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        // SQLite coordinates the destination transaction and its WAL. Never overwrite
+        // a live main file while stale journal pages or other connections may remain.
+        source.BackupDatabase(destination);
     }
 
     /// <inheritdoc />

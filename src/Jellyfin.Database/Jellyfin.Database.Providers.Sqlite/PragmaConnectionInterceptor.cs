@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Data.Common;
 using System.Globalization;
@@ -21,6 +22,7 @@ public class PragmaConnectionInterceptor : DbConnectionInterceptor
     private readonly int _tempStoreMode;
     private readonly int _syncMode;
     private readonly IDictionary<string, string> _customPragma;
+    private readonly SqliteCorruptionGuard? _corruptionGuard;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PragmaConnectionInterceptor"/> class.
@@ -33,7 +35,13 @@ public class PragmaConnectionInterceptor : DbConnectionInterceptor
     /// <param name="syncMode">The https://sqlite.org/pragma.html#pragma_synchronous pragma.</param>
     /// <param name="customPragma">A list of custom provided Pragma in the list of CustomOptions starting with "#PRAGMA:".</param>
     public PragmaConnectionInterceptor(ILogger logger, int? cacheSize, string lockingMode, int? journalSizeLimit, int tempStoreMode, int syncMode, IDictionary<string, string> customPragma)
+        : this(logger, cacheSize, lockingMode, journalSizeLimit, tempStoreMode, syncMode, customPragma, null)
     {
+    }
+
+    internal PragmaConnectionInterceptor(ILogger logger, int? cacheSize, string lockingMode, int? journalSizeLimit, int tempStoreMode, int syncMode, IDictionary<string, string> customPragma, SqliteCorruptionGuard? corruptionGuard)
+    {
+        _corruptionGuard = corruptionGuard;
         _logger = logger;
         _cacheSize = cacheSize;
         _lockingMode = lockingMode;
@@ -51,29 +59,45 @@ public class PragmaConnectionInterceptor : DbConnectionInterceptor
     /// <inheritdoc/>
     public override void ConnectionOpened(DbConnection connection, ConnectionEndEventData eventData)
     {
+        _corruptionGuard?.ThrowIfCorrupted();
         base.ConnectionOpened(connection, eventData);
 
-        using (var command = connection.CreateCommand())
+        try
         {
+            using var command = connection.CreateCommand();
 #pragma warning disable CA2100 // Review SQL queries for security vulnerabilities
             command.CommandText = InitialCommand;
 #pragma warning restore CA2100 // Review SQL queries for security vulnerabilities
             command.ExecuteNonQuery();
+        }
+        catch (Exception exception)
+        {
+            _corruptionGuard?.ObserveFailure(exception);
+            throw;
         }
     }
 
     /// <inheritdoc/>
     public override async Task ConnectionOpenedAsync(DbConnection connection, ConnectionEndEventData eventData, CancellationToken cancellationToken = default)
     {
+        _corruptionGuard?.ThrowIfCorrupted();
         await base.ConnectionOpenedAsync(connection, eventData, cancellationToken).ConfigureAwait(false);
 
-        var command = connection.CreateCommand();
-        await using (command.ConfigureAwait(false))
+        try
         {
+            var command = connection.CreateCommand();
+            await using (command.ConfigureAwait(false))
+            {
 #pragma warning disable CA2100 // Review SQL queries for security vulnerabilities
-            command.CommandText = InitialCommand;
+                command.CommandText = InitialCommand;
 #pragma warning restore CA2100 // Review SQL queries for security vulnerabilities
-            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+                await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (Exception exception)
+        {
+            _corruptionGuard?.ObserveFailure(exception);
+            throw;
         }
     }
 

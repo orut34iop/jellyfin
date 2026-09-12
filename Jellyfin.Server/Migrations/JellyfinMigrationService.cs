@@ -255,6 +255,13 @@ internal class JellyfinMigrationService
                     migrationLogger.LogCritical("Error: {Error}", ex.Message);
                     migrationLogger.LogError(ex, "Migration {Name} failed", item.Key);
 
+                    _jellyfinDatabaseProvider?.OnDatabaseError(ex);
+                    if (_jellyfinDatabaseProvider?.RequiresRecovery is true)
+                    {
+                        migrationLogger.LogCritical("Database corruption requires manual recovery. Skipping all automatic rollback to preserve the database and journal files.");
+                        throw;
+                    }
+
                     if (_backupKey != default && _backupService is not null && _jellyfinDatabaseProvider is not null)
                     {
                         if (_backupKey.LibraryDb is not null)

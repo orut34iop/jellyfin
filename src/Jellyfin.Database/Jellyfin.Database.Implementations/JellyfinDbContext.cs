@@ -280,6 +280,7 @@ public class JellyfinDbContext(DbContextOptions<JellyfinDbContext> options, ILog
         }
         catch (Exception e)
         {
+            jellyfinDatabaseProvider.OnDatabaseError(e);
             logger.LogError(e, "Error trying to save changes.");
             throw;
         }
@@ -306,6 +307,7 @@ public class JellyfinDbContext(DbContextOptions<JellyfinDbContext> options, ILog
         }
         catch (Exception e)
         {
+            jellyfinDatabaseProvider.OnDatabaseError(e);
             logger.LogError(e, "Error trying to save changes.");
             throw;
         }
