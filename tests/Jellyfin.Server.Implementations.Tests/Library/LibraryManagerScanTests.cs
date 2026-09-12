@@ -1,3 +1,5 @@
+using System;
+using System.Threading;
 using System.Threading.Tasks;
 using AutoFixture;
 using AutoFixture.AutoMoq;
@@ -30,6 +32,24 @@ public class LibraryManagerScanTests
 
         await manager.StartScanInBackground().ConfigureAwait(true);
 
-        tasks.Verify(t => t.CancelIfRunningAndQueue<RefreshMediaLibraryTask>(), scanRunning ? Times.Never() : Times.Once());
+        tasks.Verify(t => t.QueueScheduledTask<RefreshMediaLibraryTask>(), scanRunning ? Times.Never() : Times.Once());
+        tasks.Verify(t => t.CancelIfRunningAndQueue<RefreshMediaLibraryTask>(), Times.Never());
+    }
+
+    [Fact]
+    public async Task ValidateMediaLibrary_RestartsScheduledScan()
+    {
+        var fixture = new Fixture().Customize(new AutoMoqCustomization());
+        fixture.Register(() => new NamingOptions());
+        var configuration = fixture.Freeze<Mock<IServerConfigurationManager>>();
+        configuration.Setup(c => c.Configuration).Returns(new ServerConfiguration());
+        configuration.Setup(c => c.ApplicationPaths.ProgramDataPath).Returns("/data");
+        var tasks = fixture.Freeze<Mock<ITaskManager>>();
+        var manager = fixture.Create<ServerLibraryManager>();
+
+        await manager.ValidateMediaLibrary(new Progress<double>(), CancellationToken.None).ConfigureAwait(true);
+
+        tasks.Verify(t => t.CancelIfRunningAndQueue<RefreshMediaLibraryTask>(), Times.Once());
+        tasks.Verify(t => t.QueueScheduledTask<RefreshMediaLibraryTask>(), Times.Never());
     }
 }

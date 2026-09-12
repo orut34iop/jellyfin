@@ -29,15 +29,20 @@ namespace Jellyfin.Controller.Tests.Entities;
 public class BaseItemTests
 {
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task ValidateChildren_FailedEnumeration_DoesNotReconcileOrDeleteChildren(bool failAfterFirstChild)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task ValidateChildren_FailedEnumeration_DoesNotReconcileOrDeleteChildren(bool failAfterFirstChild, bool accessDenied)
     {
         var previousLibrary = BaseItem.LibraryManager;
         var previousRepository = BaseItem.ItemRepository;
         var previousLogger = BaseItem.Logger;
+        var previousMediaSourceManager = BaseItem.MediaSourceManager;
         var library = new Mock<ILibraryManager>(MockBehavior.Strict);
         library.Setup(m => m.GetLibraryOptions(It.IsAny<BaseItem>())).Returns(new LibraryOptions());
+        var mediaSourceManager = new Mock<IMediaSourceManager>();
+        mediaSourceManager.Setup(m => m.GetPathProtocol(It.IsAny<string>())).Returns(MediaProtocol.File);
         var repository = new Mock<MediaBrowser.Controller.Persistence.IItemRepository>(MockBehavior.Strict);
         var directory = new Mock<IDirectoryService>();
         directory.Setup(d => d.IsAccessible(It.IsAny<string>())).Returns(true);
@@ -46,7 +51,8 @@ public class BaseItemTests
             BaseItem.LibraryManager = library.Object;
             BaseItem.ItemRepository = repository.Object;
             BaseItem.Logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<BaseItem>.Instance;
-            var folder = new FailingEnumerationFolder(failAfterFirstChild)
+            BaseItem.MediaSourceManager = mediaSourceManager.Object;
+            var folder = new FailingEnumerationFolder(failAfterFirstChild, accessDenied)
             {
                 Id = Guid.NewGuid(),
                 Path = "/media/review-folder"
@@ -62,6 +68,7 @@ public class BaseItemTests
             BaseItem.LibraryManager = previousLibrary;
             BaseItem.ItemRepository = previousRepository;
             BaseItem.Logger = previousLogger;
+            BaseItem.MediaSourceManager = previousMediaSourceManager;
         }
     }
 
@@ -753,7 +760,7 @@ public class BaseItemTests
         Assert.Equal(expectedSkipResolvingVideoSymlinks, directoryService.SkipResolvingVideoSymlinks);
     }
 
-    private sealed class FailingEnumerationFolder(bool failAfterFirstChild) : Folder
+    private sealed class FailingEnumerationFolder(bool failAfterFirstChild, bool accessDenied) : Folder
     {
         public bool EnumerationAttempted { get; private set; }
 
@@ -763,6 +770,11 @@ public class BaseItemTests
             if (failAfterFirstChild)
             {
                 yield return new Movie { Id = Guid.NewGuid(), Path = "/media/review-folder/movie.mkv" };
+            }
+
+            if (accessDenied)
+            {
+                throw new System.Security.SecurityException("Simulated access failure");
             }
 
             throw new IOException("Simulated directory read failure");

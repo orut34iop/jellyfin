@@ -318,7 +318,7 @@ namespace Emby.Server.Implementations.Library
 
             if (wizardChanged)
             {
-                _taskManager.CancelIfRunningAndQueue<RefreshMediaLibraryTask>();
+                QueueLibraryScan();
             }
         }
 
@@ -4037,14 +4037,14 @@ namespace Emby.Server.Implementations.Library
 
         internal Task StartScanInBackground()
         {
-            return Task.Run(() =>
+            // An active scan already handles library structure changes, so this request can be dropped.
+            if (IsScanRunning)
             {
-                // An active scan already handles library changes; queuing another would cancel it.
-                if (!IsScanRunning)
-                {
-                    ValidateMediaLibrary(new Progress<double>(), CancellationToken.None);
-                }
-            });
+                return Task.CompletedTask;
+            }
+
+            // Queue instead of restarting so a scan that starts after the check is allowed to finish.
+            return Task.Run(QueueLibraryScan);
         }
 
         public void AddMediaPath(string virtualFolderName, MediaPathInfo mediaPath)
@@ -4296,6 +4296,18 @@ namespace Emby.Server.Implementations.Library
 
             SetTopParentOrAncestorIds(query);
             return _itemRepository.GetQueryFiltersLegacy(query);
+        }
+
+        /// <inheritdoc />
+        public IReadOnlyList<string> GetTagNames(InternalItemsQuery query)
+        {
+            if (query.User is not null)
+            {
+                AddUserToQuery(query, query.User);
+            }
+
+            SetTopParentOrAncestorIds(query);
+            return _itemRepository.GetTagNames(query);
         }
 
         /// <inheritdoc />

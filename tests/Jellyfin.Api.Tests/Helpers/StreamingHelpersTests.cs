@@ -15,9 +15,10 @@ namespace Jellyfin.Api.Tests.Helpers
         [InlineData("/media/show/episode.mp4", "mov,mp4,m4a,3gp,3g2,mj2", ".mp4")]
         [InlineData("/media/show/episode.MP4", "mov, mp4, m4a, 3gp, 3g2, mj2", ".MP4")]
         [InlineData("/media/show/episode.m4v", "mov,mp4,m4a,3gp,3g2,mj2", ".mov")]
-        public static void GetOutputFileExtension_NoRequestedExtension_PrefersMatchingMediaSourceFileExtension(string path, string container, string expected)
+        public static void GetOutputFileExtension_ExtensionlessProgressiveRoute_PrefersMatchingMediaSourceFileExtension(string path, string container, string expected)
         {
             var state = CreateVideoStreamState();
+            state.RequestedUrl = $"/Videos/{Guid.Empty}/stream";
             var mediaSource = new MediaSourceInfo
             {
                 Path = path,

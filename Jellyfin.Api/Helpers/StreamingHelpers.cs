@@ -304,7 +304,8 @@ public static class StreamingHelpers
             return codecExtension;
         }
 
-        // Fallback to the container of mediaSource
+        // Extensionless progressive routes such as /Videos/{itemId}/stream can reach this fallback
+        // when neither a container nor a recognized output codec was requested.
         if (!string.IsNullOrEmpty(mediaSource?.Container))
         {
             var mediaSourceExtension = GetMediaSourceFileExtension(mediaSource);
