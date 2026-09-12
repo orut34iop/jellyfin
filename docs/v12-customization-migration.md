@@ -62,7 +62,35 @@ cd /Users/wiz/dev/Jellyfin12/Jellyfin
 ./scripts/build-macos-v12.sh --install
 ```
 
-安装脚本生成共享构建时间版本、自包含 arm64 应用和 ad-hoc 签名，保留被替换的 V12 应用副本后启动新版。可通过 JELLYFIN_FFMPEG_DIR 指定已有 Jellyfin FFmpeg 工具目录。默认复用 V10 应用内工具，但不修改 V10 应用。
+安装脚本生成共享构建时间版本、自包含 arm64 应用和 ad-hoc 签名，保留被替换的 V12 应用副本后启动新版。可通过 JELLYFIN_FFMPEG_DIR 指定已有 Jellyfin FFmpeg 工具目录，默认复用已安装 V12 应用内的工具。首次安装需显式指定工具目录。
+
+## macOS 桌面启动器迁移补全
+
+早期 V12 包直接用 Shell 启动后台服务，遗漏了 V10 官方包的原生菜单栏启动器；此前的构建/API 验收未覆盖桌面菜单，未能发现这一缺口。现由 `packaging/macos` 的原生 AppKit 启动器负责菜单与服务生命周期，Shell 仅负责配置迁移及启动参数。默认端口仍为 `8096`，保留 V12 独立数据目录。
+
+逐项对照官方启动器 `jellyfin/jellyfin-server-macos` 的 `7f9809e5ee244f049798f98786cf155fcbb752de` 以及本仓库 V10 打包指南：
+
+| V10 桌面能力/资源 | V12 处理 |
+| --- | --- |
+| 菜单栏图标、无 Dock 图标 | 原生 NSStatusItem + LSUIElement；官方模板图标随仓库保存 |
+| 打开 Web 页面 | 读取现有端口、HTTPS 要求及 BaseUrl |
+| 打开本机 Jellyfin Media Player | 检测 `tv.jellyfin.player` 后显示菜单 |
+| 查看日志 | 指向 V12 的 log 目录；另提供数据目录入口 |
+| 重启、退出时停止服务 | 等待所管理的子进程退出；另提供单独启动/停止操作 |
+| 偏好设置、登录时启动 | 原生偏好窗口及 macOS 13+ SMAppService；默认不擅自开启 |
+| 关于/版本显示 | 显示同一份构建时间戳版本 |
+| AppIcon、菜单图标 | 固定到仓库，不再依赖已删除的 V10 应用目录 |
+| storyboard、LaunchAtLogin helper | 由代码构建窗口及系统 SMAppService 替代，无外部 Swift 包依赖 |
+| FFmpeg、FFprobe、.NET runtime、Web | 继续随应用打包；FFmpeg 默认来源改为现有 V12 |
+| 重复启动、升级时停止 | 文件锁限制单个启动器；安装器先退出启动器及其服务 |
+
+构建需要 Xcode Command Line Tools（swiftc），启动器最低 macOS 13。登录时启动使用 V12 独立 bundle ID，不改变旧 V10 的登录项。官方发行包的公证签名不属于本地定制构建；本地继续使用 ad-hoc 签名。此清单覆盖 macOS 打包与桌面功能，不代表已重新验收所有媒体播放与后端定制功能。
+
+回归验证：编译运行 `packaging/macos/LauncherTests.swift` 与 `LauncherCore.swift`，检查地址解析、单实例和服务生命周期；运行端口迁移 Python 测试；构建安装后检查菜单栏、菜单操作、进程父子关系、HTTP 200、健康状态及时间戳版本。桌面诊断写入 `log/desktop-launcher-state.json`，不包含认证令牌。
+
+2026-09-12 本次补全验收：13 项 Swift 检查、9 项端口迁移测试通过；已安装版本 `12.0.0-20260912171020`。实际验证启动器拥有服务子进程、SIGTERM 后二者正常退出、重新打开应用恢复服务、偏好窗口显示完整版本、Show Logs 打开 V12 日志目录、Open Jellyfin 在浏览器进入 `http://127.0.0.1:8096/web/index.html#/home`。原生诊断报告菜单栏状态项可见、服务正常运行。退出验收发现并修复了 AppKit 嵌套事件循环中的主队列等待问题，已增加专项回归用例。
+
+验收边界：桌面自动化只能抓取普通窗口，未对顶部菜单栏进行截图或逐项点击；下拉菜单控制逻辑由原生状态诊断及生命周期测试覆盖。登录时启动开关保持关闭，未进行注销重登测试；本机未安装官方 Jellyfin Media Player，其条件菜单仅完成代码路径检查。未重新执行所有媒体库、转码和 Moonfin 播放验收。
 
 
 ## V12 官方符号链接改进
