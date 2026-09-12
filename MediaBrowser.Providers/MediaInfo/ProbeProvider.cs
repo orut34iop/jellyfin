@@ -143,6 +143,12 @@ namespace MediaBrowser.Providers.MediaInfo
                 }
             }
 
+            if (IsMissingMediaInfo(item))
+            {
+                _logger.LogDebug("Refreshing {ItemPath} because it has no media information.", item.Path);
+                return true;
+            }
+
             if (video is not null
                 && item.SupportsLocalMetadata
                 && !video.IsPlaceHolder)
@@ -174,6 +180,25 @@ namespace MediaBrowser.Providers.MediaInfo
             }
 
             return false;
+        }
+
+        private static bool IsMissingMediaInfo(BaseItem item)
+        {
+            if (item.RunTimeTicks.HasValue
+                || item.TotalBitrate.HasValue
+                || item.IsVirtualItem
+                || item.IsShortcut
+                || !item.IsFileProtocol)
+            {
+                return false;
+            }
+
+            return item switch
+            {
+                Video video => !video.IsPlaceHolder && video.IsCompleteMedia,
+                Audio => true,
+                _ => false
+            };
         }
 
         /// <inheritdoc />
