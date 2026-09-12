@@ -1353,7 +1353,6 @@ namespace Emby.Server.Implementations.Library
                 {
                     IncludeItemTypes = [BaseItemKind.MusicArtist],
                     Name = name,
-                    UseRawName = true,
                     DtoOptions = options
                 }).Cast<MusicArtist>()
                 .OrderBy(i => i.IsAccessedByName ? 1 : 0)
@@ -3963,9 +3962,9 @@ namespace Emby.Server.Implementations.Library
 
                 if (refreshLibrary)
                 {
-                    StartScanInBackground();
+                    _ = StartScanInBackground();
                 }
-                else if (!IsScanRunning)
+                else
                 {
                     // Need to add a delay here or directory watchers may still pick up the changes
                     await Task.Delay(1000).ConfigureAwait(false);
@@ -4036,12 +4035,15 @@ namespace Emby.Server.Implementations.Library
             }
         }
 
-        private void StartScanInBackground()
+        internal Task StartScanInBackground()
         {
-            Task.Run(() =>
+            return Task.Run(() =>
             {
-                // No need to start if scanning the library because it will handle it
-                ValidateMediaLibrary(new Progress<double>(), CancellationToken.None);
+                // An active scan already handles library changes; queuing another would cancel it.
+                if (!IsScanRunning)
+                {
+                    ValidateMediaLibrary(new Progress<double>(), CancellationToken.None);
+                }
             });
         }
 
@@ -4153,7 +4155,7 @@ namespace Emby.Server.Implementations.Library
                 {
                     await ValidateTopLibraryFolders(CancellationToken.None, true).ConfigureAwait(false);
 
-                    StartScanInBackground();
+                    _ = StartScanInBackground();
                 }
                 else
                 {

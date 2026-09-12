@@ -19,10 +19,8 @@ namespace Jellyfin.Server.Implementations.Tests.Collections;
 
 public class CollectionLibraryScanTests
 {
-    [Theory]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    public async Task CreatingCollectionLibrary_DoesNotReplaceAnActiveScan(bool scanRunning, bool expectRefresh)
+    [Fact]
+    public async Task CreatingCollectionLibrary_RequestsRefreshThroughSharedGuard()
     {
         var path = Directory.CreateTempSubdirectory("jellyfin-collection-test-").FullName;
         try
@@ -33,8 +31,7 @@ public class CollectionLibraryScanTests
             root.SetupGet(f => f.Children).Returns(() => created ? [folder] : []);
             var library = new Mock<ILibraryManager>();
             library.SetupGet(m => m.RootFolder).Returns(root.Object);
-            library.SetupGet(m => m.IsScanRunning).Returns(scanRunning);
-            library.Setup(m => m.AddVirtualFolder("Collections", CollectionTypeOptions.boxsets, It.IsAny<LibraryOptions>(), expectRefresh))
+            library.Setup(m => m.AddVirtualFolder("Collections", CollectionTypeOptions.boxsets, It.IsAny<LibraryOptions>(), true))
                 .Callback(() => created = true)
                 .Returns(Task.CompletedTask);
             var fileSystem = new Mock<IFileSystem>();
@@ -53,7 +50,7 @@ public class CollectionLibraryScanTests
 
             Assert.Same(folder, await manager.EnsureLibraryFolder(path, true).ConfigureAwait(true));
             Assert.Same(folder, await manager.EnsureLibraryFolder(path, true).ConfigureAwait(true));
-            library.Verify(m => m.AddVirtualFolder("Collections", CollectionTypeOptions.boxsets, It.Is<LibraryOptions>(o => !o.EnableRealtimeMonitor && o.SaveLocalMetadata), expectRefresh), Times.Once);
+            library.Verify(m => m.AddVirtualFolder("Collections", CollectionTypeOptions.boxsets, It.Is<LibraryOptions>(o => !o.EnableRealtimeMonitor && o.SaveLocalMetadata), true), Times.Once);
         }
         finally
         {
