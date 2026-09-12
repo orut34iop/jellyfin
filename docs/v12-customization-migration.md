@@ -9,6 +9,16 @@
 - 远端 origin 保留用户的 orut34iop fork。该服务端 fork 没有 release tags，且 master 早于正式版，因此从官方 upstream 补取正式标签。
 - 原指定服务端目录实际为 Web 仓库；用户明确授权清空后重新准备服务端源码。
 
+## release-12.z 维护分支同步（2026-09-12）
+
+当前定制分支已整体合并官方 `release-12.z` 至提交 `3c698bab7fb7c607e726a0bf79f0bb0f7616e962`，保留官方合并历史。同步内容包括：剧集名称与多版本识别、Trickplay 视频流选择、负数媒体流索引拦截、TMDb 图片尺寸、家长分级大小写与意大利分级数据、路径包含判断、版本号小数点处理、FFmpeg 运行时能力探测、元数据提供者顺序即时生效、媒体探测失败重试、图片刷新失败计数，以及新增合集库后的文件夹识别。
+
+元数据提供者代码的合并冲突按两边语义组合解决：保留本地元数据模式显式允许远程内容探测的刷新选项，同时采用官方按实际 CollectionFolder 查找媒体库路径的逻辑。官方新增测试已改为调用定制分支实际使用的重载。
+
+同时归并本轮上游 PR 审阅后的改进：MusicArtist 单条查询改用 `CleanName` 并复用现有索引；人物原始名称查询及 `Type + lower(Name)` 定制索引继续保留；活动扫描保护移至 `StartScanInBackground` 公共入口；目录枚举移除无效初始化；媒体输出扩展名的编码映射拆分并扩大回归覆盖。解决方案中两个媒体编码项目的 Release 配置也从误配的 Debug 修正为 Release，避免正式构建加载不兼容的调试分析器。
+
+最终验证：相关测试 619 项通过，Windows 专属文件系统用例 13 项在 macOS 跳过；`Jellyfin.sln` Release 构建 0 警告、0 错误；13 项启动器测试及 9 项网络迁移测试通过。已安装并完成一次优雅退出与重新启动，`/web/index.html` 返回 HTTP 200，`/System/Info/Public` 报告 `12.0.0-20260912215910` 且初始化向导状态保持完成。启动器诊断确认状态栏可见、服务运行、菜单与父子进程关系正常。
+
 ## 基线验证（归并前已完成）
 
 服务端 .NET 10/macOS arm64 self-contained publish 成功。Web npm ci、生产构建、TypeScript 检查成功。应用安装至 `/Applications/Jellyfin V12.app`，签名校验通过。启动后 `/health` 返回 Healthy，`/System/Info/Public` 返回 12.0.0，`/web/index.html` 返回 200，浏览器显示初始化向导。
