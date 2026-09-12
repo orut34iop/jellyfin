@@ -6,6 +6,12 @@ WEB_DIR="${JELLYFIN_WEB_SOURCE:-$SERVER_DIR/../Jellyfin Web Client}"
 BUILD_ROOT="${JELLYFIN_BUILD_ROOT:-$SERVER_DIR/.build/macos-arm64}"
 BUILD_STAMP="${JELLYFIN_BUILD_STAMP:-$(date '+%Y%m%d%H%M%S')}"
 FFMPEG_DIR="${JELLYFIN_FFMPEG_DIR:-/Applications/Jellyfin.app/Contents/MacOS}"
+LAUNCH_PORT="${JELLYFIN_HTTP_PORT:-8096}"
+if [[ ! "$LAUNCH_PORT" =~ ^[0-9]{1,5}$ ]] || (( 10#$LAUNCH_PORT < 1 || 10#$LAUNCH_PORT > 65535 )); then
+    echo 'JELLYFIN_HTTP_PORT must be an integer between 1 and 65535.' >&2
+    exit 1
+fi
+LAUNCH_PORT=$((10#$LAUNCH_PORT))
 APP_STAGE="$BUILD_ROOT/Jellyfin V12.app"
 APP_INSTALL="/Applications/Jellyfin V12.app"
 export APP_STAGE BUILD_STAMP
@@ -32,19 +38,19 @@ mkdir -p "$APP_STAGE/Contents/MacOS" "$APP_STAGE/Contents/Resources"
 ditto "$BUILD_ROOT/server-publish" "$APP_STAGE/Contents/MacOS/server"
 ditto "$WEB_DIR/dist" "$APP_STAGE/Contents/Resources/jellyfin-web"
 cp "$FFMPEG_DIR/ffmpeg" "$FFMPEG_DIR/ffprobe" "$APP_STAGE/Contents/MacOS/"
+cp "$SERVER_DIR/scripts/migrate-v12-network.py" "$APP_STAGE/Contents/Resources/"
+printf '%s\n' "$LAUNCH_PORT" > "$APP_STAGE/Contents/Resources/default-http-port"
 if [ -f /Applications/Jellyfin.app/Contents/Resources/AppIcon.icns ]; then
     cp /Applications/Jellyfin.app/Contents/Resources/AppIcon.icns "$APP_STAGE/Contents/Resources/"
 fi
 cat > "$APP_STAGE/Contents/MacOS/launch-jellyfin" <<'LAUNCH'
 #!/bin/zsh
+set -eu
 APP_ROOT="${0:A:h:h}"
 DATA_ROOT="$HOME/Library/Application Support/jellyfin-v12"
 mkdir -p "$DATA_ROOT/log" "$DATA_ROOT/config"
-if [ ! -f "$DATA_ROOT/config/network.xml" ]; then
-    cat > "$DATA_ROOT/config/network.xml" <<'NETWORK'
-<NetworkConfiguration><InternalHttpPort>18096</InternalHttpPort><PublicHttpPort>18096</PublicHttpPort><AutoDiscovery>false</AutoDiscovery><EnableRemoteAccess>false</EnableRemoteAccess><LocalNetworkAddresses><string>127.0.0.1</string></LocalNetworkAddresses></NetworkConfiguration>
-NETWORK
-fi
+LAUNCH_PORT="$(cat "$APP_ROOT/Resources/default-http-port")"
+python3 "$APP_ROOT/Resources/migrate-v12-network.py" "$DATA_ROOT/config/network.xml" "$LAUNCH_PORT" >> "$DATA_ROOT/log/launcher.log" 2>&1
 exec "$APP_ROOT/MacOS/server/jellyfin" --datadir "$DATA_ROOT" --configdir "$DATA_ROOT/config" --cachedir "$DATA_ROOT/cache" --logdir "$DATA_ROOT/log" --webdir "$APP_ROOT/Resources/jellyfin-web" --ffmpeg "$APP_ROOT/MacOS/ffmpeg" >> "$DATA_ROOT/log/launcher.log" 2>&1
 LAUNCH
 chmod +x "$APP_STAGE/Contents/MacOS/launch-jellyfin"
@@ -79,4 +85,4 @@ if [ "${1:-}" = '--install' ]; then
     codesign --verify --deep --strict "$APP_INSTALL"
     open "$APP_INSTALL"
 fi
-printf 'App: %s\nVersion: 12.0.0-%s\nURL: http://127.0.0.1:18096/web/index.html\n' "$APP_STAGE" "$BUILD_STAMP"
+printf 'App: %s\nVersion: 12.0.0-%s\nDefault URL: http://127.0.0.1:%s/web/index.html (existing custom network settings take precedence)\n' "$APP_STAGE" "$BUILD_STAMP" "$LAUNCH_PORT"

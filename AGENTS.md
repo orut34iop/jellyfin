@@ -72,7 +72,7 @@ dotnet test Jellyfin.sln --configuration Release --collect:"XPlat Code Coverage"
 
 - After any code change, promptly commit the finished change and push the branch.
 - Every local compile or publish must include the build date/time in the version metadata. `Directory.Build.targets` generates `AssemblyInformationalVersion` automatically; for publish/install builds, use a single timestamp such as `BUILD_STAMP=$(date '+%Y%m%d%H%M%S')` and pass `/p:JellyfinBuildDateTime=$BUILD_STAMP` so all projects share the same version suffix. `AssemblyVersion` and `AssemblyFileVersion` in `SharedVersion.cs` must remain numeric.
-- On macOS arm64, after any code change, rebuild the macOS arm64 app, install it to `/Applications/Jellyfin V12.app`, and verify it starts successfully. The minimum verification is opening `/Applications/Jellyfin V12.app`, confirming `http://127.0.0.1:18096/web/index.html` returns HTTP 200, and confirming `/System/Info/Public` reports the timestamped version.
+- On macOS arm64, after any code change, rebuild the macOS arm64 app, install it to `/Applications/Jellyfin V12.app`, and verify it starts successfully. The minimum verification is opening `/Applications/Jellyfin V12.app`, confirming `http://127.0.0.1:8096/web/index.html` returns HTTP 200, and confirming `/System/Info/Public` reports the timestamped version.
 - On Ubuntu or other Linux build hosts, do not require building or installing the macOS arm64 app. Build and test the relevant Linux targets with the required shared `JellyfinBuildDateTime` timestamp instead.
 
 Restore packages:

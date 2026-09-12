@@ -15,7 +15,7 @@
 #
 # 环境变量:
 #   JELLYFIN_DATA_DIR    数据目录            默认 ~/Library/Application Support/jellyfin-v12
-#   JELLYFIN_HOST        API host[:port]    默认 127.0.0.1:18096
+#   JELLYFIN_HOST        API host[:port]    默认 127.0.0.1:8096
 #   JELLYFIN_TOKEN       管理员 token；若设置则跳过 DB 抓取
 #   JELLYFIN_TOKEN_FILE  token 缓存文件     默认 /tmp/jellyfin-monitor-token
 #   JELLYFIN_STATE_FILE  状态文件用于差分   默认 /tmp/jellyfin-monitor-state.json
@@ -25,7 +25,7 @@
 set -u
 
 DATA_DIR="${JELLYFIN_DATA_DIR:-$HOME/Library/Application Support/jellyfin-v12}"
-API_HOST="${JELLYFIN_HOST:-127.0.0.1:18096}"
+API_HOST="${JELLYFIN_HOST:-127.0.0.1:8096}"
 TOKEN_FILE="${JELLYFIN_TOKEN_FILE:-/tmp/jellyfin-monitor-token}"
 STATE_FILE="${JELLYFIN_STATE_FILE:-/tmp/jellyfin-monitor-state.json}"
 TASK_ID="${JELLYFIN_TASK_ID:-7738148ffcd07979c7ceb148e06b3aed}"
@@ -264,7 +264,7 @@ Jellyfin "Scan Media Library" 进度监控
 
 环境变量:
   JELLYFIN_DATA_DIR    数据目录              默认 ~/Library/Application Support/jellyfin-v12
-  JELLYFIN_HOST        API host[:port]      默认 127.0.0.1:18096
+  JELLYFIN_HOST        API host[:port]      默认 127.0.0.1:8096
   JELLYFIN_TOKEN       管理员 token；若设则跳过 DB 抓取
   JELLYFIN_TOKEN_FILE  token 缓存文件        默认 /tmp/jellyfin-monitor-token
   JELLYFIN_STATE_FILE  状态文件用于差分      默认 /tmp/jellyfin-monitor-state.json

@@ -74,7 +74,7 @@ scripts/jellyfin-scan-monitor.sh --reset-token
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `JELLYFIN_DATA_DIR` | `~/Library/Application Support/jellyfin-v12` | 数据目录（含 `data/jellyfin.db` 与 `log/`） |
-| `JELLYFIN_HOST` | `127.0.0.1:18096` | API host[:port] |
+| `JELLYFIN_HOST` | `127.0.0.1:8096` | API host[:port] |
 | `JELLYFIN_TOKEN` | _（无）_ | 管理员 token；如设则跳过 DB 抓取 |
 | `JELLYFIN_TOKEN_FILE` | `/tmp/jellyfin-monitor-token` | token 缓存文件（mode 0600） |
 | `JELLYFIN_STATE_FILE` | `/tmp/jellyfin-monitor-state.json` | 差分对比用状态文件 |
@@ -98,7 +98,7 @@ scripts/jellyfin-scan-monitor.sh --watch 120
 走第 3 步的前提：你之前用 Web 客户端登录过（在 Devices 表里留了 token）。如果还没登录，需要先：
 
 ```bash
-open http://127.0.0.1:18096   # 用浏览器走启动向导，登录一次
+open http://127.0.0.1:8096   # 用浏览器走启动向导，登录一次
 ```
 
 ## 输出样例
@@ -218,11 +218,11 @@ scripts/jellyfin-scan-monitor.sh --watch 300
 
 ### `[任务] 跳过 API (无 token; ...)`
 
-DB 里 Devices 表为空，说明从没用 Web 客户端登录过。打开 `http://127.0.0.1:18096`，走启动向导/登录，让 Jellyfin 把 token 写进去。
+DB 里 Devices 表为空，说明从没用 Web 客户端登录过。打开 `http://127.0.0.1:8096`，走启动向导/登录，让 Jellyfin 把 token 写进去。
 
 ### `[任务] API 无响应 (3 次重试均超时)`
 
-- 立刻手测 `curl -m 30 -H "X-Emby-Token: <TOKEN>" http://127.0.0.1:18096/System/Info/Public`，看是不是真的卡。
+- 立刻手测 `curl -m 30 -H "X-Emby-Token: <TOKEN>" http://127.0.0.1:8096/System/Info/Public`，看是不是真的卡。
 - 如果 `/System/Info/Public` 都不响应，jellyfin 主线程被 SQLite 锁住了；等几分钟自然恢复或考虑重启（重启会丢一段扫描进度）。
 
 ### `[error] DB not found at ...`
@@ -241,7 +241,7 @@ JELLYFIN_TASK_ID=<your-task-id> scripts/jellyfin-scan-monitor.sh --trigger
 
 ```bash
 TOKEN=$(cat /tmp/jellyfin-monitor-token)
-curl -sS -H "X-Emby-Token: $TOKEN" http://127.0.0.1:18096/ScheduledTasks \
+curl -sS -H "X-Emby-Token: $TOKEN" http://127.0.0.1:8096/ScheduledTasks \
   | python3 -c 'import sys,json
 for t in json.load(sys.stdin):
     print(t["Id"], t["Name"], t.get("Key",""))'
