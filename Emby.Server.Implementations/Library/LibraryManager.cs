@@ -1502,10 +1502,49 @@ namespace Emby.Server.Implementations.Library
             var scanStart = Stopwatch.GetTimestamp();
             var lastProgressLog = scanStart;
             var lastLoggedProgress = -1d;
+            var currentProgress = 0d;
+            var currentPhase = "initializing";
+            var progressStateLock = new object();
+
+            async Task LogScanProgressHeartbeatAsync(CancellationToken heartbeatCancellationToken)
+            {
+                using var timer = new PeriodicTimer(TimeSpan.FromMinutes(1));
+                try
+                {
+                    while (await timer.WaitForNextTickAsync(heartbeatCancellationToken).ConfigureAwait(false))
+                    {
+                        double progressPercent;
+                        string phase;
+                        lock (progressStateLock)
+                        {
+                            progressPercent = currentProgress;
+                            phase = currentPhase;
+                        }
+
+                        var elapsed = Stopwatch.GetElapsedTime(scanStart);
+                        _logger.LogInformation(
+                            "Media library scan heartbeat {Progress:F1}% phase {Phase}; elapsed {Minutes} minute(s) {Seconds} seconds",
+                            progressPercent,
+                            phase,
+                            Math.Truncate(elapsed.TotalMinutes),
+                            elapsed.Seconds);
+                    }
+                }
+                catch (OperationCanceledException) when (heartbeatCancellationToken.IsCancellationRequested)
+                {
+                    // The scan completed or was cancelled; no heartbeat is needed.
+                }
+            }
 
             void ReportScanProgress(double percent, string phase)
             {
                 progress.Report(percent);
+
+                lock (progressStateLock)
+                {
+                    currentProgress = percent;
+                    currentPhase = phase;
+                }
 
                 var now = Stopwatch.GetTimestamp();
                 var elapsed = Stopwatch.GetElapsedTime(scanStart);
@@ -1524,23 +1563,33 @@ namespace Emby.Server.Implementations.Library
                 }
             }
 
-            _logger.LogInformation("Media library scan phase started: validating library folders");
-            await ValidateTopLibraryFolders(cancellationToken).ConfigureAwait(false);
-            _logger.LogInformation("Media library scan phase completed: validating library folders");
+            using var heartbeatCancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var heartbeatTask = LogScanProgressHeartbeatAsync(heartbeatCancellationSource.Token);
+            try
+            {
+                _logger.LogInformation("Media library scan phase started: validating library folders");
+                await ValidateTopLibraryFolders(cancellationToken).ConfigureAwait(false);
+                _logger.LogInformation("Media library scan phase completed: validating library folders");
 
-            var innerProgress = new Progress<double>(pct => ReportScanProgress(pct * 0.96, "library validation"));
+                var innerProgress = new Progress<double>(pct => ReportScanProgress(pct * 0.96, "library validation"));
 
-            // Validate the entire media library
-            await RootFolder.ValidateChildren(innerProgress, new MetadataRefreshOptions(new DirectoryService(_fileSystem)), recursive: true, cancellationToken: cancellationToken).ConfigureAwait(false);
+                // Validate the entire media library
+                await RootFolder.ValidateChildren(innerProgress, new MetadataRefreshOptions(new DirectoryService(_fileSystem)), recursive: true, cancellationToken: cancellationToken).ConfigureAwait(false);
 
-            ReportScanProgress(96, "library validation completed");
-            _logger.LogInformation("Media library scan phase completed: library validation");
+                ReportScanProgress(96, "library validation completed");
+                _logger.LogInformation("Media library scan phase completed: library validation");
 
-            innerProgress = new Progress<double>(pct => ReportScanProgress(96 + (pct * .04), "post-scan tasks"));
+                innerProgress = new Progress<double>(pct => ReportScanProgress(96 + (pct * .04), "post-scan tasks"));
 
-            await RunPostScanTasks(innerProgress, cancellationToken).ConfigureAwait(false);
+                await RunPostScanTasks(innerProgress, cancellationToken).ConfigureAwait(false);
 
-            ReportScanProgress(100, "post-scan tasks completed");
+                ReportScanProgress(100, "post-scan tasks completed");
+            }
+            finally
+            {
+                await heartbeatCancellationSource.CancelAsync().ConfigureAwait(false);
+                await heartbeatTask.ConfigureAwait(false);
+            }
         }
 
         /// <summary>
