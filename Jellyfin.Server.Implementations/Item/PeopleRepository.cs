@@ -158,18 +158,23 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
         var distinctCredits = credits.DistinctBy(e => (e.LoweredName, e.PersonType, e.LoweredRole)).ToArray();
 
         var distinctPersons = distinctCredits.DistinctBy(e => (e.LoweredName, e.PersonType)).ToArray();
-        var personKeys = distinctPersons.Select(e => e.LoweredName + "-" + e.PersonType).ToArray();
 
         using var context = _dbProvider.CreateDbContext();
         using var transaction = context.Database.BeginTransaction();
-        var existingPersons = context.Peoples.Select(e => new
+        // Query each person type separately so SQLite can use IX_Peoples_NameLower.
+        // Combining the two fields into `lower(Name) || '-' || PersonType` forces a full
+        // scan of Peoples for every media item, which is prohibitive during a large import.
+        var existingPersons = new List<People>();
+        foreach (var personTypeGroup in distinctPersons.GroupBy(e => e.PersonType, StringComparer.Ordinal))
         {
-            item = e,
-            SelectionKey = e.Name.ToLower() + "-" + e.PersonType
-        })
-            .Where(p => personKeys.Contains(p.SelectionKey))
-            .Select(f => f.item)
-            .ToArray();
+            var names = personTypeGroup
+                .Select(e => e.LoweredName)
+                .ToArray();
+
+            existingPersons.AddRange(context.Peoples
+                .Where(e => e.PersonType == personTypeGroup.Key && names.Contains(e.Name.ToLower()))
+                .ToArray());
+        }
 
         var existingPersonKeys = existingPersons.Select(e => (e.Name.ToLowerInvariant(), e.PersonType ?? string.Empty)).ToHashSet();
 
