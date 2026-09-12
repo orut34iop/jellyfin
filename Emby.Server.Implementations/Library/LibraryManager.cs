@@ -3965,7 +3965,7 @@ namespace Emby.Server.Implementations.Library
                 {
                     StartScanInBackground();
                 }
-                else
+                else if (!IsScanRunning)
                 {
                     // Need to add a delay here or directory watchers may still pick up the changes
                     await Task.Delay(1000).ConfigureAwait(false);

@@ -110,7 +110,15 @@ namespace Emby.Server.Implementations.Collections
             // This names a library for the whole server, so ignore the requesting client's language.
             var name = _localizationManager.GetServerLocalizedString("Collections");
 
-            await _libraryManager.AddVirtualFolder(name, CollectionTypeOptions.boxsets, libraryOptions, true).ConfigureAwait(false);
+            // The post-scan collection task can create this library. Scheduling a full
+            // refresh here would cancel the scan that is currently creating it.
+            var refreshLibrary = !_libraryManager.IsScanRunning;
+            if (!refreshLibrary)
+            {
+                _logger.LogInformation("Creating the collections library during an active scan without requesting a replacement scan");
+            }
+
+            await _libraryManager.AddVirtualFolder(name, CollectionTypeOptions.boxsets, libraryOptions, refreshLibrary).ConfigureAwait(false);
 
             _libraryManager.RootFolder.Children = null;
 
