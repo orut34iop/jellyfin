@@ -160,6 +160,36 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
         var distinctPersons = distinctCredits.DistinctBy(e => (e.LoweredName, e.PersonType)).ToArray();
 
         using var context = _dbProvider.CreateDbContext();
+        var existingMaps = context.PeopleBaseItemMap
+            .Include(e => e.People)
+            .Where(e => e.ItemId == itemId)
+            .ToList();
+
+        // Most library scans refresh unchanged local metadata. Avoid opening a write
+        // transaction when the item's people mappings, order and roles are unchanged.
+        var incomingCredits = distinctCredits
+            .Select((credit, index) => new
+            {
+                Key = (credit.LoweredName, credit.PersonType, credit.LoweredRole),
+                Role = credit.Person.Role,
+                ListOrder = index,
+                SortOrder = credit.Person.SortOrder
+            })
+            .ToDictionary(e => e.Key);
+        var mappingsAreUnchanged = existingMaps.Count == incomingCredits.Count
+            && existingMaps.All(map =>
+                incomingCredits.TryGetValue(
+                    (map.People.Name.ToLowerInvariant(), map.People.PersonType ?? string.Empty, map.Role?.ToLowerInvariant() ?? string.Empty),
+                    out var incoming)
+                && map.ListOrder == incoming.ListOrder
+                && map.SortOrder == incoming.SortOrder
+                && string.Equals(map.Role, incoming.Role, StringComparison.Ordinal));
+
+        if (mappingsAreUnchanged)
+        {
+            return;
+        }
+
         using var transaction = context.Database.BeginTransaction();
         // Query each person type separately so SQLite can use IX_Peoples_NameLower.
         // Combining the two fields into `lower(Name) || '-' || PersonType` forces a full
@@ -193,7 +223,6 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
             personsEntities.TryAdd((entity.Name.ToLowerInvariant(), entity.PersonType ?? string.Empty), entity);
         }
 
-        var existingMaps = context.PeopleBaseItemMap.Include(e => e.People).Where(e => e.ItemId == itemId).ToList();
         var existingMapsByCredit = new Dictionary<(string LoweredName, string PersonType, string LoweredRole), PeopleBaseItemMap>();
         foreach (var map in existingMaps)
         {
