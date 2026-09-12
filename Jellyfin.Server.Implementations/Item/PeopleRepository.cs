@@ -161,6 +161,7 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
 
         using var context = _dbProvider.CreateDbContext();
         var existingMaps = context.PeopleBaseItemMap
+            .AsNoTracking()
             .Include(e => e.People)
             .Where(e => e.ItemId == itemId)
             .ToList();
@@ -183,7 +184,7 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
                     out var incoming)
                 && map.ListOrder == incoming.ListOrder
                 && map.SortOrder == incoming.SortOrder
-                && string.Equals(map.Role, incoming.Role, StringComparison.Ordinal));
+                && string.Equals(map.Role ?? string.Empty, incoming.Role, StringComparison.OrdinalIgnoreCase));
 
         if (mappingsAreUnchanged)
         {
@@ -191,6 +192,13 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
         }
 
         using var transaction = context.Database.BeginTransaction();
+        // The fast-path snapshot was read before acquiring the write transaction. Reload
+        // tracked mappings inside it so a concurrent refresh cannot leave stale credits.
+        existingMaps = context.PeopleBaseItemMap
+            .Include(e => e.People)
+            .Where(e => e.ItemId == itemId)
+            .ToList();
+
         // Query each person type separately so SQLite can use IX_Peoples_NameLower.
         // Combining the two fields into `lower(Name) || '-' || PersonType` forces a full
         // scan of Peoples for every media item, which is prohibitive during a large import.

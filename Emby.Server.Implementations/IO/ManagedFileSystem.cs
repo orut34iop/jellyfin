@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -753,14 +754,27 @@ namespace Emby.Server.Implementations.IO
             var directory = NativeMethods.OpenDirectory(path);
             if (directory == IntPtr.Zero)
             {
-                yield break;
+                // An inaccessible directory is not an empty directory. Returning no entries
+                // would let the scanner remove its previously indexed children.
+                throw new IOException($"Unable to open directory '{path}'", new Win32Exception(Marshal.GetLastPInvokeError()));
             }
 
             try
             {
-                IntPtr entry;
-                while ((entry = NativeMethods.ReadDirectory(directory)) != IntPtr.Zero)
+                while (true)
                 {
+                    var entry = NativeMethods.ReadDirectory(directory);
+                    if (entry == IntPtr.Zero)
+                    {
+                        var error = Marshal.GetLastPInvokeError();
+                        if (error != 0)
+                        {
+                            throw new IOException($"Unable to read directory '{path}'", new Win32Exception(error));
+                        }
+
+                        break;
+                    }
+
                     var name = NativeMethods.GetDirectoryEntryName(entry);
                     if (string.IsNullOrEmpty(name) || name is "." or "..")
                     {

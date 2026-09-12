@@ -24,6 +24,27 @@ public partial class ManagedFileSystemTests
     }
 
     [Fact]
+    public void GetFileSystemEntries_LocalOnlyMissingDirectory_DoesNotLookEmpty()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Assert.ThrowsAny<IOException>(() => _sut.GetFileSystemEntries(path, false, true).ToArray());
+    }
+
+    [Fact]
+    public void GetFileSystemEntries_LocalOnlyEmptyDirectory_ReturnsEmpty()
+    {
+        var directory = Directory.CreateTempSubdirectory();
+        try
+        {
+            Assert.Empty(_sut.GetFileSystemEntries(directory.FullName, false, true));
+        }
+        finally
+        {
+            directory.Delete();
+        }
+    }
+
+    [Fact]
     public void MoveDirectory_SameFileSystem_Correct()
         => MoveDirectoryInternal();
 

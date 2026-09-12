@@ -28,6 +28,43 @@ namespace Jellyfin.Controller.Tests.Entities;
 
 public class BaseItemTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ValidateChildren_FailedEnumeration_DoesNotReconcileOrDeleteChildren(bool failAfterFirstChild)
+    {
+        var previousLibrary = BaseItem.LibraryManager;
+        var previousRepository = BaseItem.ItemRepository;
+        var previousLogger = BaseItem.Logger;
+        var library = new Mock<ILibraryManager>(MockBehavior.Strict);
+        library.Setup(m => m.GetLibraryOptions(It.IsAny<BaseItem>())).Returns(new LibraryOptions());
+        var repository = new Mock<MediaBrowser.Controller.Persistence.IItemRepository>(MockBehavior.Strict);
+        var directory = new Mock<IDirectoryService>();
+        directory.Setup(d => d.IsAccessible(It.IsAny<string>())).Returns(true);
+        try
+        {
+            BaseItem.LibraryManager = library.Object;
+            BaseItem.ItemRepository = repository.Object;
+            BaseItem.Logger = Microsoft.Extensions.Logging.Abstractions.NullLogger<BaseItem>.Instance;
+            var folder = new FailingEnumerationFolder(failAfterFirstChild)
+            {
+                Id = Guid.NewGuid(),
+                Path = "/media/review-folder"
+            };
+            await folder.ValidateChildren(new Progress<double>(), new MetadataRefreshOptions(directory.Object), recursive: false, cancellationToken: TestContext.Current.CancellationToken).ConfigureAwait(true);
+            Assert.True(folder.EnumerationAttempted);
+            repository.VerifyNoOtherCalls();
+            library.Verify(m => m.GetLibraryOptions(It.IsAny<BaseItem>()), Times.Once);
+            library.VerifyNoOtherCalls();
+        }
+        finally
+        {
+            BaseItem.LibraryManager = previousLibrary;
+            BaseItem.ItemRepository = previousRepository;
+            BaseItem.Logger = previousLogger;
+        }
+    }
+
     [Fact]
     public void GetItemByNameFolderName_ShortName_IsKeptAsIs()
     {
@@ -685,5 +722,21 @@ public class BaseItemTests
 
         var directoryService = Assert.IsType<DirectoryService>(capturedOptions!.DirectoryService);
         Assert.Equal(expectedSkipResolvingVideoSymlinks, directoryService.SkipResolvingVideoSymlinks);
+    }
+
+    private sealed class FailingEnumerationFolder(bool failAfterFirstChild) : Folder
+    {
+        public bool EnumerationAttempted { get; private set; }
+
+        protected override IEnumerable<BaseItem> GetNonCachedChildren(IDirectoryService directoryService)
+        {
+            EnumerationAttempted = true;
+            if (failAfterFirstChild)
+            {
+                yield return new Movie { Id = Guid.NewGuid(), Path = "/media/review-folder/movie.mkv" };
+            }
+
+            throw new IOException("Simulated directory read failure");
+        }
     }
 }

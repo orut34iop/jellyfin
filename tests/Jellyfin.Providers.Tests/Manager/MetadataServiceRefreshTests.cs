@@ -25,6 +25,28 @@ namespace Jellyfin.Providers.Tests.Manager
     public class MetadataServiceRefreshTests
     {
         [Theory]
+        [InlineData(true, "/media/movie.mkv", false)]
+        [InlineData(true, "/media/movie.strm", true)]
+        [InlineData(false, "/media/movie.mkv", true)]
+        public void BeforeSave_OnlySyntheticFileMetadataSkipsExtractedDataInvalidation(bool localOnly, string path, bool shouldInvalidate)
+        {
+            var config = new Mock<IServerConfigurationManager>();
+            config.Setup(c => c.GetConfiguration("metadata")).Returns(new MetadataConfiguration());
+            var library = new Mock<ILibraryManager>();
+            library.Setup(l => l.GetLibraryOptions(It.IsAny<BaseItem>())).Returns(new LibraryOptions { LocalMetadataOnlyImport = localOnly });
+            var fileSystem = new Mock<IFileSystem>();
+            var info = new FileSystemMetadata { Exists = true, LastWriteTimeUtc = DateTime.UnixEpoch };
+            fileSystem.Setup(f => f.GetFileSystemInfo(path)).Returns(info);
+            fileSystem.Setup(f => f.GetFileSystemInfo(path, true)).Returns(info);
+            var external = new Mock<IExternalDataManager>();
+            external.Setup(e => e.DeleteExternalItemDataAsync(It.IsAny<BaseItem>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            var service = new FileChangeMetadataService(config.Object, library.Object, fileSystem.Object, external.Object);
+            var item = new Movie { Id = Guid.NewGuid(), Name = "Movie", Path = path, DateModified = DateTime.UnixEpoch.AddDays(1) };
+            service.SaveFileChange(item);
+            external.Verify(e => e.DeleteExternalItemDataAsync(item, It.IsAny<CancellationToken>()), shouldInvalidate ? Times.Once() : Times.Never());
+        }
+
+        [Theory]
         // RemoveOldMetadata is only ever set by an explicit user action - a refresh with "replace all
         // metadata", or Identify. A provider failing must not silently downgrade that to a merge: the
         // providers that did answer supplied the replacement, and the old values are the wrong match
@@ -310,6 +332,14 @@ namespace Jellyfin.Providers.Tests.Manager
                 Saved = true;
                 return Task.CompletedTask;
             }
+        }
+
+        private sealed class FileChangeMetadataService(IServerConfigurationManager config, ILibraryManager library, IFileSystem fileSystem, IExternalDataManager external)
+            : MetadataService<Movie, MovieInfo>(config, NullLogger<MetadataService<Movie, MovieInfo>>.Instance, Mock.Of<IProviderManager>(), fileSystem, library, external, Mock.Of<IItemRepository>())
+        {
+            public void SaveFileChange(Movie item) => BeforeSaveInternal(item, false, ItemUpdateType.None);
+
+            protected override bool EnableUpdateMetadataFromChildren(Movie item, bool isFullRefresh, ItemUpdateType currentUpdateType) => false;
         }
 
         private sealed class TestMetadataService : MetadataService<Movie, MovieInfo>

@@ -371,8 +371,9 @@ namespace MediaBrowser.Providers.Manager
             if (!string.IsNullOrEmpty(itemPath))
             {
                 var libraryOptions = LibraryManager.GetLibraryOptions(item);
-                var info = LocalMetadataOnlyImportPolicy.IsEnabled(libraryOptions)
-                    && LocalMetadataOnlyImportPolicy.IsVideoLikePath(itemPath)
+                var usesPlaceholderMetadata = LocalMetadataOnlyImportPolicy.IsEnabled(libraryOptions)
+                    && LocalMetadataOnlyImportPolicy.IsVideoLikePath(itemPath);
+                var info = usesPlaceholderMetadata
                     ? FileSystem.GetFileSystemInfo(itemPath, true)
                     : FileSystem.GetFileSystemInfo(itemPath);
                 if (info.Exists && item.HasChanged(info.LastWriteTimeUtc))
@@ -388,10 +389,10 @@ namespace MediaBrowser.Providers.Manager
                         }
                     }
 
-                    // Local-only imports deliberately skip probing and generated video data. Removing
-                    // extracted data here for every changed symlink just adds a costly filesystem and
-                    // database pass, and can make a large initial import appear stalled.
-                    if (item is Video video && !LocalMetadataOnlyImportPolicy.IsEnabled(libraryOptions))
+                    // A synthetic timestamp is not evidence that the source video changed.
+                    // Keep invalidating extracted data when we have real file metadata,
+                    // including paths outside the placeholder set in a local-only library.
+                    if (item is Video video && !usesPlaceholderMetadata)
                     {
                         Logger.LogInformation("File changed, pruning extracted data: {Path}", item.Path);
                         ExternalDataManager.DeleteExternalItemDataAsync(video, CancellationToken.None).GetAwaiter().GetResult();
