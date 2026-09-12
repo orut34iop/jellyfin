@@ -281,7 +281,7 @@ namespace Jellyfin.Providers.Tests.Manager
             var providerManager = new Mock<IProviderManager>(MockBehavior.Loose);
             providerManager.Setup(p => p.GetImageProviders(It.IsAny<BaseItem>(), It.IsAny<ImageRefreshOptions>()))
                 .Returns(Array.Empty<IImageProvider>());
-            providerManager.Setup(p => p.GetMetadataProviders<TestItem>(It.IsAny<BaseItem>(), It.IsAny<LibraryOptions>()))
+            providerManager.Setup(p => p.GetMetadataProviders<TestItem>(It.IsAny<BaseItem>(), It.IsAny<LibraryOptions>(), It.IsAny<MetadataRefreshOptions>()))
                 .Returns(new[] { (IMetadataProvider<TestItem>)provider.Object });
             providerManager.Setup(p => p.GetMetadataSavers(It.IsAny<BaseItem>(), It.IsAny<LibraryOptions>()))
                 .Returns(Array.Empty<IMetadataSaver>());
@@ -342,7 +342,7 @@ namespace Jellyfin.Providers.Tests.Manager
             var providerManager = new Mock<IProviderManager>(MockBehavior.Loose);
             providerManager.Setup(p => p.GetImageProviders(It.IsAny<BaseItem>(), It.IsAny<ImageRefreshOptions>()))
                 .Returns(Array.Empty<IImageProvider>());
-            providerManager.Setup(p => p.GetMetadataProviders<TestItem>(It.IsAny<BaseItem>(), It.IsAny<LibraryOptions>()))
+            providerManager.Setup(p => p.GetMetadataProviders<TestItem>(It.IsAny<BaseItem>(), It.IsAny<LibraryOptions>(), It.IsAny<MetadataRefreshOptions>()))
                 .Returns(new[] { (IMetadataProvider<TestItem>)provider.Object });
             providerManager.Setup(p => p.GetMetadataSavers(It.IsAny<BaseItem>(), It.IsAny<LibraryOptions>()))
                 .Returns(Array.Empty<IMetadataSaver>());
@@ -446,7 +446,7 @@ namespace Jellyfin.Providers.Tests.Manager
             var providerManager = new Mock<IProviderManager>(MockBehavior.Loose);
             providerManager.Setup(p => p.GetImageProviders(It.IsAny<BaseItem>(), It.IsAny<ImageRefreshOptions>()))
                 .Returns(imageProviders ?? Array.Empty<IImageProvider>());
-            providerManager.Setup(p => p.GetMetadataProviders<TestItem>(It.IsAny<BaseItem>(), It.IsAny<LibraryOptions>()))
+            providerManager.Setup(p => p.GetMetadataProviders<TestItem>(It.IsAny<BaseItem>(), It.IsAny<LibraryOptions>(), It.IsAny<MetadataRefreshOptions>()))
                 .Returns(metadataProviders ?? Array.Empty<IMetadataProvider<TestItem>>());
             providerManager.Setup(p => p.GetMetadataSavers(It.IsAny<BaseItem>(), It.IsAny<LibraryOptions>()))
                 .Returns(Array.Empty<IMetadataSaver>());
