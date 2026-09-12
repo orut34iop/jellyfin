@@ -105,6 +105,19 @@ SQLite backup API 取得的一致性快照上进行。
 验证：新增保护测试 11/11 通过；媒体库、Item 仓储、数据库保护和 EF 迁移回归
 共 490/490 通过。macOS arm64 包已构建，版本 `12.0.0-20260912120855`。
 
+部署验收：上述版本已安装到 `/Applications/Jellyfin V12.app`，网页返回 HTTP 200，
+`/System/Info/Public` 返回对应时间戳版本。持久快照完整 integrity_check 为 ok
+（352 秒），foreign_key_check 为 0（43 秒），SHA-256 已写入 verification.json。
+旧进程正常退出后，另存停服状态数据库及 WAL/SHM/journal 和应用日志，目录为
+`recovery-snapshots/before-install-20260912120855`。使用应用自带 SQLite 3.53.3
+恢复 WAL；重新启动后通过正常只读连接确认 journal_mode 为 wal。未清空媒体库。
+
+用户数据补充核对：故障副本和上述快照中的 Permissions（24 行）、Preferences（13 行）、
+DisplayPreferences（1 行）、ItemDisplayPreferences（18 行）逐值一致；Users（1 行）
+仅 LastActivityDate、RowVersion 变化，其他字段一致。UserData 两份均为 0 行；
+故障副本本身不是可信的故障前基线，因此这不能证明故障前没有播放记录。
+结果保存在快照目录 user-data-comparison.json，不包含字段值或密码内容。
+
 ## 根因边界
 
 - 原库多个被引用的损坏页面抽样为整页 4,096 字节全零，涉及表和索引；不是只重建
