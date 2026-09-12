@@ -58,12 +58,43 @@ http_jellyfin_running() {
       || pgrep -f "Jellyfin.Server" >/dev/null
 }
 
+build_authorization_header() {
+    local token="$1"
+    local app_name="Jellyfin Scan Monitor"
+    local app_version="1.0.0"
+    local device_id="jellyfin-scan-monitor"
+    local device_name
+    device_name=$(hostname -s 2>/dev/null || hostname)
+
+    # V12 disables the legacy X-Emby-Token header by default. Reuse the
+    # metadata belonging to this token when it is available so the modern
+    # MediaBrowser authorization header identifies the existing device.
+    if [ -f "$DB" ] && [[ "$token" =~ ^[[:alnum:]]+$ ]]; then
+        local row
+        row=$(sqlite3 -readonly -separator '|' "$DB" \
+            "SELECT AppName, AppVersion, DeviceId, DeviceName FROM Devices WHERE AccessToken='$token' ORDER BY DateLastActivity DESC LIMIT 1;" \
+            2>/dev/null || true)
+        if [ -n "$row" ]; then
+            IFS='|' read -r app_name app_version device_id device_name <<<"$row"
+        fi
+    fi
+
+    app_name=$(printf '%s' "$app_name" | tr -d '\r\n"')
+    app_version=$(printf '%s' "$app_version" | tr -d '\r\n"')
+    device_id=$(printf '%s' "$device_id" | tr -d '\r\n"')
+    device_name=$(printf '%s' "$device_name" | tr -d '\r\n"')
+    printf 'MediaBrowser Client="%s", Device="%s", DeviceId="%s", Version="%s", Token="%s"' \
+        "$app_name" "$device_name" "$device_id" "$app_version" "$token"
+}
+
 api_get_task() {
     local token="$1"
+    local authorization
+    authorization=$(build_authorization_header "$token")
     # 拥塞时 API 偶尔超时，重试 3 次
     local body=""
     for attempt in 1 2 3; do
-        body=$(curl -sS -m 8 -H "X-Emby-Token: $token" "$API/ScheduledTasks/$TASK_ID" 2>/dev/null)
+        body=$(curl -fsS -m 8 -H "Authorization: $authorization" "$API/ScheduledTasks/$TASK_ID" 2>/dev/null)
         [ -n "$body" ] && { echo "$body"; return 0; }
         sleep 2
     done
@@ -75,9 +106,10 @@ api_get_task() {
 cmd_trigger() {
     local token
     token=$(fetch_token) || die "no token available (DB missing or empty)"
-    local code
+    local authorization code
+    authorization=$(build_authorization_header "$token")
     code=$(curl -sS -o /dev/null -w "%{http_code}" -X POST \
-                -H "X-Emby-Token: $token" \
+                -H "Authorization: $authorization" \
                 "$API/ScheduledTasks/Running/$TASK_ID")
     echo "[trigger] POST /ScheduledTasks/Running/$TASK_ID -> HTTP $code"
     [ "$code" = "204" ] || exit 3
