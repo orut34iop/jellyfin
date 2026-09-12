@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
+using Jellyfin.Extensions.Json;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Persistence;
@@ -11,6 +13,21 @@ namespace Jellyfin.Controller.Tests.Entities;
 
 public class AggregateFolderTests
 {
+    [Fact]
+    public void Serialize_WithCachedChildren_DoesNotPersistChildren()
+    {
+        var root = new AggregateFolder
+        {
+            PhysicalLocationsList = ["/libraries/movies"],
+            Children = [new Folder { Name = "Movies" }]
+        };
+
+        using var json = JsonDocument.Parse(JsonSerializer.Serialize(root, JsonDefaults.Options));
+
+        Assert.False(json.RootElement.TryGetProperty("Children", out _));
+        Assert.Equal("/libraries/movies", json.RootElement.GetProperty("PhysicalLocationsList")[0].GetString());
+    }
+
     [Fact]
     public void Children_ClearedAfterALibraryWasAdded_ListsTheNewLibrary()
     {

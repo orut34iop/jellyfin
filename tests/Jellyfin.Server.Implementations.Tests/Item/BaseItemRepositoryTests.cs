@@ -2,6 +2,7 @@ using System;
 using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Server.Implementations.Item;
 using MediaBrowser.Controller;
+using MediaBrowser.Controller.Entities;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -11,6 +12,27 @@ namespace Jellyfin.Server.Implementations.Tests.Item;
 
 public class BaseItemRepositoryTests
 {
+    [Fact]
+    public void DeserializeBaseItem_WithPersistedRootChildren_IgnoresCacheAndPreservesFolderData()
+    {
+        var entity = new BaseItemEntity
+        {
+            Id = Guid.NewGuid(),
+            Type = typeof(AggregateFolder).FullName!,
+            Name = "Root",
+            Data = """
+                {"PhysicalLocationsList":["/libraries/movies"],"Children":[{"Name":"Movies"}]}
+                """
+        };
+
+        var result = BaseItemRepository.DeserializeBaseItem(entity, NullLogger.Instance, null, false);
+
+        var folder = Assert.IsType<AggregateFolder>(result);
+        Assert.Equal(entity.Id, folder.Id);
+        Assert.Equal("Root", folder.Name);
+        Assert.Equal(["/libraries/movies"], folder.PhysicalLocationsList);
+    }
+
     [Fact]
     public void DeserializeBaseItem_WithUnknownType_ReturnsNull()
     {
