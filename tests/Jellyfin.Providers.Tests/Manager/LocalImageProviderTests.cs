@@ -101,7 +101,22 @@ public class LocalImageProviderTests
         Assert.Empty(images);
     }
 
-    private static LocalImageInfo[] GetImages(string videoName, string[] names, bool mixed = true, long imageLength = 1)
+    [Theory]
+    [InlineData(VideoType.VideoFile, ".mp4", false)]
+    [InlineData(VideoType.VideoFile, ".mp4", true)]
+    [InlineData(VideoType.Iso, ".iso", false)]
+    [InlineData(VideoType.Iso, ".iso", true)]
+    public void GetImages_FileStack_MainMovieAndOwnedPartFindSharedArtwork(VideoType videoType, string extension, bool ownedPart)
+    {
+        var first = "Movie-CD1" + extension;
+        var second = "Movie-CD2" + extension;
+        var images = GetImages(ownedPart ? second : first, [first, second, "Movie-poster.jpg", "Movie-fanart.jpg"], videoType: videoType, ownedPart: ownedPart);
+
+        Assert.Equal("Movie-poster.jpg", Assert.Single(images, image => image.Type == ImageType.Primary).FileInfo.Name);
+        Assert.Equal("Movie-fanart.jpg", Assert.Single(images, image => image.Type == ImageType.Backdrop).FileInfo.Name);
+    }
+
+    private static LocalImageInfo[] GetImages(string videoName, string[] names, bool mixed = true, long imageLength = 1, VideoType videoType = VideoType.VideoFile, bool ownedPart = false)
     {
         var directory = Path.GetTempPath();
         var files = names.Select(name => new FileSystemMetadata
@@ -113,12 +128,10 @@ public class LocalImageProviderTests
         }).ToArray();
         var directoryService = new Mock<IDirectoryService>();
         directoryService.Setup(service => service.GetFileSystemEntries(It.IsAny<string>())).Returns(files);
-        var item = new Movie
-        {
-            Path = Path.Combine(directory, videoName),
-            VideoType = VideoType.VideoFile,
-            IsInMixedFolder = mixed
-        };
+        Video item = ownedPart ? new Video() : new Movie();
+        item.Path = Path.Combine(directory, videoName);
+        item.VideoType = videoType;
+        item.IsInMixedFolder = mixed;
         var provider = new LocalImageProvider(Mock.Of<IFileSystem>(), new NamingOptions());
 
         return provider.GetImages(item, directoryService.Object).ToArray();

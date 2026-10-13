@@ -150,7 +150,7 @@ namespace MediaBrowser.LocalMetadata.Images
             // Owned additional parts have no AdditionalParts themselves. Resolve the actual
             // sibling files so both the main movie and its parts can use shared artwork.
             if (item is not Video video || item is Episode || !item.IsFileProtocol
-                || video.VideoType != VideoType.VideoFile || item.ExtraType is not null
+                || video.VideoType is VideoType.Dvd or VideoType.BluRay || item.ExtraType is not null
                 || files.Count == 0
                 || !_namingOptions.VideoFileStackingRules.Any(rule => rule.Match(Path.GetFileName(item.Path), out _)))
             {
