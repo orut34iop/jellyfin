@@ -94,7 +94,7 @@ cd /Users/wiz/dev/Jellyfin12/Jellyfin
 | FFmpeg、FFprobe、.NET runtime、Web | 继续随应用打包；FFmpeg 默认来源改为现有 V12 |
 | 重复启动、升级时停止 | 文件锁限制单个启动器；安装器先退出启动器及其服务 |
 
-构建需要 Xcode Command Line Tools（swiftc），启动器最低 macOS 13。登录时启动使用 V12 独立 bundle ID，不改变旧 V10 的登录项。官方发行包的公证签名不属于本地定制构建；本地继续使用 ad-hoc 签名。此清单覆盖 macOS 打包与桌面功能，不代表已重新验收所有媒体播放与后端定制功能。
+构建需要 Xcode Command Line Tools（swiftc），启动器最低 macOS 13。登录时启动使用 V12 独立 bundle ID，不改变旧 V10 的登录项。官方发行包的公证签名不属于本地定制构建。本地打包先检查有效 Apple 签名身份：只有一个时自动使用，多个时通过 `JELLYFIN_SIGNING_IDENTITY` 指定证书 SHA-1；检查或签名失败即停止，禁止临时签名回退。安装后校验实际签名证书与选定身份一致。此清单覆盖 macOS 打包与桌面功能，不代表已重新验收所有媒体播放与后端定制功能。
 
 回归验证：编译运行 `packaging/macos/LauncherTests.swift` 与 `LauncherCore.swift`，检查地址解析、单实例和服务生命周期；运行端口迁移 Python 测试；构建安装后检查菜单栏、菜单操作、进程父子关系、HTTP 200、健康状态及时间戳版本。桌面诊断写入 `log/desktop-launcher-state.json`，不包含认证令牌。
 

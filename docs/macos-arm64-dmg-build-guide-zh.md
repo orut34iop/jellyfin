@@ -33,7 +33,7 @@
 由此推出两条**硬性约束**（与本文档早期版本不同）：
 
 1. **必须 `--self-contained true` publish** —— 否则 `MacOS/` 内缺少 `libcoreclr.dylib` 等运行时；GUI 启动不继承 shell `PATH`，会找不到 .NET runtime。
-2. **替换 Mach-O 文件后必须重新 codesign**（ad-hoc 即可） —— 否则会破坏官方签名导致 macOS 拒绝运行。
+2. **替换 Mach-O 文件后必须使用有效 Apple 证书重新 codesign**。构建前执行 `security find-identity -v -p codesigning`；只有一个有效身份时使用该身份，多个时明确选定证书 SHA-1，检查或签名失败即停止，禁止临时签名回退。V12 推荐使用 `scripts/build-macos-v12.sh --install` 自动检查和验证。
 
 ## 1. 环境准备
 
@@ -152,7 +152,8 @@ plutil -replace CFBundleVersion -string "$VERSION_TAG" "$APP_DST/Contents/Info.p
 
 # 重新签名（必须）：替换 Mach-O 会让官方签名失效
 rm -rf "$APP_DST/Contents/_CodeSignature"
-codesign --force --deep --sign - "$APP_DST"
+codesign --force --deep --sign "${JELLYFIN_SIGNING_IDENTITY:?请先检查并选定有效 Apple 签名证书 SHA-1}" "$APP_DST"
+codesign --verify --deep --strict "$APP_DST"
 ```
 
 打 dmg 前**强烈建议先就地试启动一次**：

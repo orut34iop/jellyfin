@@ -24,13 +24,41 @@ if [ "${1:-}" != '' ] && [ "${1:-}" != '--install' ]; then
     echo "Usage: $0 [--install]" >&2
     exit 1
 fi
+# Select a real identity before any compilation; never fall back to ad-hoc signing.
+SIGNING_IDENTITIES="$(security find-identity -v -p codesigning)"
+VALID_IDENTITIES=()
+while IFS= read -r identity; do
+    [ -z "$identity" ] || VALID_IDENTITIES+=("$identity")
+done < <(printf '%s\n' "$SIGNING_IDENTITIES" | awk '/"(Apple Development:|Mac Developer:|Developer ID Application:|Apple Distribution:)/ { print $2 }')
+SIGNING_IDENTITY="${JELLYFIN_SIGNING_IDENTITY:-}"
+if [ -z "$SIGNING_IDENTITY" ] && [ "${#VALID_IDENTITIES[@]}" -eq 1 ]; then
+    SIGNING_IDENTITY="${VALID_IDENTITIES[0]}"
+fi
+identity_valid=false
+for identity in "${VALID_IDENTITIES[@]}"; do
+    if [ "$identity" = "$SIGNING_IDENTITY" ]; then identity_valid=true; fi
+done
+if [ "$identity_valid" != true ]; then
+    echo 'Select a valid Apple signing certificate SHA-1 with JELLYFIN_SIGNING_IDENTITY (required when multiple identities exist).' >&2
+    exit 1
+fi
+verify_signing_identity() {
+    local certificate_dir actual_identity
+    codesign --verify --deep --strict "$1"
+    certificate_dir="$(mktemp -d)"
+    codesign --display --extract-certificates="$certificate_dir/cert" "$1"
+    actual_identity="$(shasum -a 1 "$certificate_dir/cert0" | awk '{ print toupper($1) }')"
+    rm -rf "$certificate_dir"
+    [ "$actual_identity" = "$SIGNING_IDENTITY" ] || { echo 'App signing identity does not match the selected certificate.' >&2; return 1; }
+}
+printf 'Signing identity: %s\n' "$SIGNING_IDENTITY"
 [ -f "$WEB_DIR/dist/index.html" ] || { echo 'Build jellyfin-web first with npm ci and npm run build:production.' >&2; exit 1; }
 [ -x "$FFMPEG_DIR/ffmpeg" ] && [ -x "$FFMPEG_DIR/ffprobe" ]
 [ -f "$SERVER_DIR/packaging/macos/AppIcon.icns" ]
 [ -f "$SERVER_DIR/packaging/macos/StatusBarIcon.png" ]
 mkdir -p "$BUILD_ROOT"
 dotnet publish "$SERVER_DIR/Jellyfin.Server/Jellyfin.Server.csproj" -c Release -r osx-arm64 --self-contained true \
-    -p:PublishSingleFile=false -p:PublishTrimmed=false -p:JellyfinBuildDateTime="$BUILD_STAMP" \
+    -p:PublishSingleFile=false -p:PublishTrimmed=false -p:_EnableMacOSCodeSign=false -p:JellyfinBuildDateTime="$BUILD_STAMP" \
     -o "$BUILD_ROOT/server-publish"
 [ -f "$BUILD_ROOT/server-publish/libcoreclr.dylib" ]
 if [ -e "$APP_STAGE" ]; then
@@ -45,6 +73,7 @@ printf '%s\n' "$LAUNCH_PORT" > "$APP_STAGE/Contents/Resources/default-http-port"
 cp "$SERVER_DIR/packaging/macos/AppIcon.icns" "$SERVER_DIR/packaging/macos/StatusBarIcon.png" "$APP_STAGE/Contents/Resources/"
 cp "$SERVER_DIR/packaging/macos/LICENSE" "$APP_STAGE/Contents/Resources/Launcher-LICENSE.txt"
 xcrun swiftc -swift-version 5 -O -target arm64-apple-macos13.0 \
+    -Xlinker -no_adhoc_codesign \
     "$SERVER_DIR/packaging/macos/LauncherCore.swift" "$SERVER_DIR/packaging/macos/main.swift" \
     -framework AppKit -framework ServiceManagement -o "$APP_STAGE/Contents/MacOS/Jellyfin V12 Launcher"
 cat > "$APP_STAGE/Contents/MacOS/launch-jellyfin" <<'LAUNCH'
@@ -65,8 +94,8 @@ app = Path(os.environ['APP_STAGE'])
 with (app/'Contents/Info.plist').open('wb') as f:
     plistlib.dump(dict(CFBundleExecutable='Jellyfin V12 Launcher', CFBundleIdentifier='org.jellyfin.server.v12.local', CFBundleName='Jellyfin V12', CFBundleDisplayName='Jellyfin V12', CFBundlePackageType='APPL', CFBundleShortVersionString='12.0.0', CFBundleVersion=os.environ['BUILD_STAMP'], CFBundleIconFile='AppIcon', LSMinimumSystemVersion='13.0', NSHighResolutionCapable=True, LSUIElement=True), f)
 PY
-codesign --force --deep --sign - "$APP_STAGE"
-codesign --verify --deep --strict "$APP_STAGE"
+codesign --force --deep --sign "$SIGNING_IDENTITY" "$APP_STAGE"
+verify_signing_identity "$APP_STAGE"
 if [ "${1:-}" = '--install' ]; then
     process_pattern='^/Applications/Jellyfin V12[.]app/Contents/MacOS/(server/jellyfin|Jellyfin V12 Launcher)( |$)'
     pids="$(pgrep -f '^/Applications/Jellyfin V12[.]app/Contents/MacOS/Jellyfin V12 Launcher( |$)' || true)"
@@ -90,7 +119,7 @@ if [ "${1:-}" = '--install' ]; then
     # Only replace the explicitly isolated V12 application after staging and verification.
     rm -rf "$APP_INSTALL"
     ditto "$APP_STAGE" "$APP_INSTALL"
-    codesign --verify --deep --strict "$APP_INSTALL"
+    verify_signing_identity "$APP_INSTALL"
     /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP_INSTALL"
     open "$APP_INSTALL"
 fi
