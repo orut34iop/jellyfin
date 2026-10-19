@@ -202,35 +202,61 @@ namespace MediaBrowser.XbmcMetadata.Savers
             }
         }
 
-        private async Task SaveToFileAsync(Stream stream, string path, CancellationToken cancellationToken)
+        internal async Task SaveToFileAsync(Stream stream, string path, CancellationToken cancellationToken)
         {
+            // Preserve the existing behavior of writing through an NFO symlink.
+            var destination = new FileInfo(path);
+            if (destination.LinkTarget is not null)
+            {
+                path = destination.ResolveLinkTarget(true)?.FullName ?? path;
+            }
             var directory = Path.GetDirectoryName(path) ?? throw new ArgumentException($"Provided path ({path}) is not valid.", nameof(path));
             Directory.CreateDirectory(directory);
 
-            // Compare byte-for-byte before proceeding.
             if (File.Exists(path) && await stream.IsFileIdenticalAsync(path, cancellationToken).ConfigureAwait(false))
             {
-                return; // Don't save since .nfo is unchanged.
+                return;
             }
 
             stream.Position = 0;
-
-            // On Windows, saving the file will fail if the file is hidden or readonly
-            FileSystem.SetAttributes(path, false, false);
-
-            var fileStreamOptions = new FileStreamOptions()
+            var temporaryPath = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+            try
             {
-                Mode = FileMode.Create,
-                Access = FileAccess.Write,
-                Share = FileShare.None,
-                PreallocationSize = stream.Length,
-                Options = FileOptions.Asynchronous
-            };
+                var fileStreamOptions = new FileStreamOptions
+                {
+                    Mode = FileMode.CreateNew,
+                    Access = FileAccess.Write,
+                    Share = FileShare.None,
+                    PreallocationSize = stream.Length,
+                    Options = FileOptions.Asynchronous
+                };
+                await using (var output = new FileStream(temporaryPath, fileStreamOptions))
+                {
+                    await stream.CopyToAsync(output, cancellationToken).ConfigureAwait(false);
+                    await output.FlushAsync(cancellationToken).ConfigureAwait(false);
+                }
 
-            var filestream = new FileStream(path, fileStreamOptions);
-            await using (filestream.ConfigureAwait(false))
+                if (!OperatingSystem.IsWindows() && File.Exists(path))
+                {
+                    File.SetUnixFileMode(temporaryPath, File.GetUnixFileMode(path));
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+                // On Windows replacing a hidden/readonly file fails. Only clear these attributes
+                // once the complete replacement exists; a failed copy leaves the original intact.
+                FileSystem.SetAttributes(path, false, false);
+                File.Move(temporaryPath, path, true);
+            }
+            finally
             {
-                await stream.CopyToAsync(filestream, cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    File.Delete(temporaryPath);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    Logger.LogWarning(ex, "Unable to remove temporary NFO {Path}", temporaryPath);
+                }
             }
 
             if (ConfigurationManager.Configuration.SaveMetadataHidden)
