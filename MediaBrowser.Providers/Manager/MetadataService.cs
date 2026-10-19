@@ -1274,10 +1274,6 @@ namespace MediaBrowser.Providers.Manager
                 {
                     target.Studios = source.Studios;
                 }
-                else
-                {
-                    target.Studios = target.Studios.Concat(source.Studios).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-                }
             }
 
             if (!lockedFields.Contains(MetadataField.Tags))
@@ -1286,10 +1282,6 @@ namespace MediaBrowser.Providers.Manager
                 {
                     target.Tags = source.Tags;
                 }
-                else
-                {
-                    target.Tags = target.Tags.Concat(source.Tags).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-                }
             }
 
             if (!lockedFields.Contains(MetadataField.ProductionLocations))
@@ -1297,10 +1289,6 @@ namespace MediaBrowser.Providers.Manager
                 if (replaceData || target.ProductionLocations.Length == 0)
                 {
                     target.ProductionLocations = source.ProductionLocations;
-                }
-                else
-                {
-                    target.ProductionLocations = target.ProductionLocations.Concat(source.ProductionLocations).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
                 }
             }
 

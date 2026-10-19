@@ -134,6 +134,18 @@ namespace Jellyfin.Providers.Tests.Manager
             Assert.True(TestMergeBaseItemData<Audio, SongInfo>(propName, oldValue, Array.Empty<string>(), null, true, out _));
         }
 
+        [Fact]
+        public void MergeBaseItemData_MissingMode_DoesNotAppendSourceCollections()
+        {
+            var target = new MetadataResult<Movie> { Item = new Movie { Genres = ["Edited"], ProductionLocations = ["Edited"], Studios = ["Edited"], Tags = ["Edited"] } };
+            var source = new MetadataResult<Movie> { Item = new Movie { Genres = ["Old"], ProductionLocations = ["Old"], Studios = ["Old"], Tags = ["Old"] } };
+            MetadataService<Movie, MovieInfo>.MergeBaseItemData(source, target, [], false, true);
+            Assert.Equal(["Edited"], target.Item.Genres);
+            Assert.Equal(["Edited"], target.Item.ProductionLocations);
+            Assert.Equal(["Edited"], target.Item.Studios);
+            Assert.Equal(["Edited"], target.Item.Tags);
+        }
+
         public static TheoryData<string, object, object> MergeBaseItemData_SimpleField_ReplacesAppropriately_TestData()
             => new()
             {
