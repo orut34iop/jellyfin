@@ -304,13 +304,15 @@ def main():
             assert get(reset_id)["Genres"] == ["Replacement"]
         finally:
             reset_nfo.write_bytes(original_reset_nfo)
+        edit(reset_id, LockData=False, Overview="Reset concurrency marker")
         with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
             futures = [pool.submit(api, f"/Items/{reset_id}/Metadata/Reset", "POST", request),
                        pool.submit(api, f"/Items/{reset_id}/Refresh?metadataRefreshMode=FullRefresh&replaceAllMetadata=true", "POST")]
             for future in futures:
                 future.result()
+        wait(lambda: get(reset_id).get("Overview") == "Original overview", "reset concurrent refresh commit")
         assert get(reset_id)["Genres"] == ["Original"]
-        assert get(reset_id)["LockData"]
+        assert get(reset_id)["LockedFields"] == before["LockedFields"]
         passed("Atomic source reset preserves locks and other fields, rejects empty/failed sources, supports explicit clearing and coexists with refresh; legacy edits need no version")
         # A reset commits the database before attempting the NFO mirror.
         nfo(save_path, "movie", "Save Failure", '<genre>Reset source</genre>')
