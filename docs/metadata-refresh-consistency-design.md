@@ -6,6 +6,8 @@ Status: final design baseline with a local implementation; validation and remain
 
 This English edition is self-contained and intended for a future upstream submission. A separate Chinese edition supports local review.
 
+Upstream priority update (2026-10-19): submit the playback-triggered descriptive refresh fix first. The two prepared collection/NFO-saving candidates are deferred. See the [focused core issue, evidence and submission plan](playback-metadata-refresh-upstream-plan.md).
+
 ## Goals and scope
 
 Media information reads should use committed database values that remain valid for the current media source. Retrieval should occur only when information required by the current operation is unknown or invalid. Technical discovery, library scanning, and descriptive metadata import need explicit boundaries so that playback, subtitle maintenance, and background refreshes cannot unexpectedly overwrite curated fields.

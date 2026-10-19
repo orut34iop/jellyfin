@@ -6,6 +6,8 @@
 
 英文版本：[Metadata Read and Refresh Consistency Design](metadata-refresh-consistency-design.md)。后续向上游提交英文版本，中文版本保留供本地审阅。
 
+上游优先级更新（2026-10-19）：先提交播放触发描述性刷新的核心修复，已准备的集合合并和 NFO 保存候选后置。参见[核心问题、证据及提交计划](playback-metadata-refresh-upstream-plan.zh-CN.md)。
+
 ## 目标与适用范围
 
 媒体信息读取应优先使用数据库中对当前媒体源有效的数据。只有当前操作需要的信息尚未获取或已失效时，才进行针对性的补充。补充技术信息、扫描媒体库和导入描述信息必须有清晰边界，避免播放、字幕维护或后台刷新意外覆盖用户已经整理的字段。
