@@ -52,6 +52,12 @@ namespace MediaBrowser.Controller.Providers
 
         public bool EnableRemoteContentProbe { get; set; }
 
+        /// <summary>
+        /// Gets or sets a value indicating whether to update only technical media information for playback,
+        /// without importing descriptive metadata or marking a full metadata refresh as complete.
+        /// </summary>
+        public bool RefreshMediaInfoOnly { get; set; }
+
         public bool RefreshItem(BaseItem item)
         {
             if (RefreshPaths is not null && RefreshPaths.Length > 0)
@@ -68,6 +74,7 @@ namespace MediaBrowser.Controller.Providers
             ForceSave = copy.ForceSave;
             ReplaceAllMetadata = copy.ReplaceAllMetadata;
             EnableRemoteContentProbe = copy.EnableRemoteContentProbe;
+            RefreshMediaInfoOnly = copy.RefreshMediaInfoOnly;
 
             IsAutomated = copy.IsAutomated;
             ImageRefreshMode = copy.ImageRefreshMode;

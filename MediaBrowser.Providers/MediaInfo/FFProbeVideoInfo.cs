@@ -395,6 +395,11 @@ namespace MediaBrowser.Providers.MediaInfo
 
         internal void FetchEmbeddedInfo(Video video, Model.MediaInfo.MediaInfo data, MetadataRefreshOptions refreshOptions, LibraryOptions libraryOptions)
         {
+            if (refreshOptions.RefreshMediaInfoOnly)
+            {
+                return;
+            }
+
             var replaceData = refreshOptions.ReplaceAllMetadata;
 
             if (!video.IsLocked && !video.LockedFields.Contains(MetadataField.OfficialRating))
@@ -507,7 +512,8 @@ namespace MediaBrowser.Providers.MediaInfo
 
         private void FetchPeople(Video video, Model.MediaInfo.MediaInfo data, MetadataRefreshOptions options)
         {
-            if (video.IsLocked
+            if (options.RefreshMediaInfoOnly
+                || video.IsLocked
                 || video.LockedFields.Contains(MetadataField.Cast)
                 || data.People.Length == 0)
             {

@@ -89,6 +89,11 @@ namespace MediaBrowser.Providers.Manager
         public virtual async Task<ItemUpdateType> RefreshMetadata(BaseItem item, MetadataRefreshOptions refreshOptions, CancellationToken cancellationToken)
         {
             var itemOfType = (TItemType)item;
+            if (refreshOptions.RefreshMediaInfoOnly)
+            {
+                return await RefreshMediaInfo(itemOfType, refreshOptions, cancellationToken).ConfigureAwait(false);
+            }
+
             var updateType = ItemUpdateType.None;
 
             var libraryOptions = LibraryManager.GetLibraryOptions(item);
@@ -267,6 +272,29 @@ namespace MediaBrowser.Providers.Manager
 
                 return updateType;
             }
+        }
+
+        private async Task<ItemUpdateType> RefreshMediaInfo(TItemType item, MetadataRefreshOptions options, CancellationToken cancellationToken)
+        {
+            var libraryOptions = LibraryManager.GetLibraryOptions(item);
+            var providers = ProviderManager.GetMetadataProviders<TItemType>(item, libraryOptions, options)
+                .Where(provider => provider is IMediaInfoProvider)
+                .OfType<ICustomMetadataProvider<TItemType>>();
+            var result = new RefreshResult { UpdateType = ItemUpdateType.None };
+
+            // Bypass descriptive metadata, images and refresh hooks, including for first-time or locked items.
+            // A playback probe must not postpone a scheduled metadata refresh by advancing DateLastRefreshed.
+            foreach (var provider in providers)
+            {
+                await RunCustomProvider(provider, item, item.Path ?? item.Name, options, result, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (result.UpdateType != ItemUpdateType.None)
+            {
+                await SaveItemAsync(new MetadataResult<TItemType> { Item = item }, result.UpdateType, false, cancellationToken).ConfigureAwait(false);
+            }
+
+            return result.UpdateType;
         }
 
         private void ApplySearchResult(ItemLookupInfo lookupInfo, RemoteSearchResult result)

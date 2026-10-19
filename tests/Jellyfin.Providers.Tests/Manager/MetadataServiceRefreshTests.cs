@@ -25,6 +25,94 @@ namespace Jellyfin.Providers.Tests.Manager
     public class MetadataServiceRefreshTests
     {
         [Theory]
+        [InlineData(false, false, false)]
+        [InlineData(false, true, false)]
+        [InlineData(true, false, false)]
+        [InlineData(true, true, false)]
+        [InlineData(false, false, true)]
+        public async Task RefreshMetadata_MediaInfoOnly_PreservesEditedMetadata(bool emptyFields, bool firstRefresh, bool isLocked)
+        {
+            var item = NewStampedTestItem();
+            item.Genres = emptyFields ? [] : ["Edited genre"];
+            item.ProductionLocations = emptyFields ? [] : ["Edited country"];
+            item.IsLocked = isLocked;
+            item.DateLastRefreshed = firstRefresh ? DateTime.MinValue : item.DateLastRefreshed;
+            var stampBefore = item.DateLastRefreshed;
+
+            // A locked NFO normally overwrites existing unlocked fields during a full refresh.
+            var local = new Mock<ILocalMetadataProvider<TestItem>>();
+            local.Setup(p => p.GetMetadata(It.IsAny<ItemInfo>(), It.IsAny<IDirectoryService>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new MetadataResult<TestItem>
+                {
+                    HasMetadata = true,
+                    Item = new TestItem { IsLocked = true, Genres = ["Original genre"], ProductionLocations = ["Original country"] }
+                });
+            var remote = new Mock<IRemoteMetadataProvider<TestItem, ItemLookupInfo>>();
+            var custom = new Mock<ICustomMetadataProvider<TestItem>>();
+            var probe = new Mock<ICustomMetadataProvider<TestItem>>();
+            probe.As<IMediaInfoProvider>();
+            probe.As<IPreRefreshProvider>();
+            probe.Setup(p => p.FetchAsync(item, It.IsAny<MetadataRefreshOptions>(), It.IsAny<CancellationToken>()))
+                .Callback(() => item.RunTimeTicks = TimeSpan.TicksPerMinute)
+                .ReturnsAsync(ItemUpdateType.MetadataImport);
+            var providerManager = NewProviderManager([local.Object, remote.Object, custom.Object, probe.Object]);
+            var service = NewService(providerManager);
+
+            await service.RefreshMetadata(
+                item,
+                new MetadataRefreshOptions(Mock.Of<IDirectoryService>())
+                {
+                    RefreshMediaInfoOnly = true,
+                    EnableRemoteContentProbe = true,
+                    MetadataRefreshMode = MetadataRefreshMode.FullRefresh,
+                    ImageRefreshMode = MetadataRefreshMode.None
+                },
+                CancellationToken.None).ConfigureAwait(true);
+
+            Assert.Equal(emptyFields ? Array.Empty<string>() : ["Edited genre"], item.Genres);
+            Assert.Equal(emptyFields ? Array.Empty<string>() : ["Edited country"], item.ProductionLocations);
+            Assert.Equal(isLocked, item.IsLocked);
+            Assert.Equal(stampBefore, item.DateLastRefreshed);
+            Assert.Equal(TimeSpan.TicksPerMinute, item.RunTimeTicks);
+            Assert.True(item.Saved);
+            probe.Verify(p => p.FetchAsync(item, It.IsAny<MetadataRefreshOptions>(), It.IsAny<CancellationToken>()), Times.Once);
+            local.Verify(p => p.GetMetadata(It.IsAny<ItemInfo>(), It.IsAny<IDirectoryService>(), It.IsAny<CancellationToken>()), Times.Never);
+            remote.Verify(p => p.GetMetadata(It.IsAny<ItemLookupInfo>(), It.IsAny<CancellationToken>()), Times.Never);
+            custom.Verify(p => p.FetchAsync(It.IsAny<TestItem>(), It.IsAny<MetadataRefreshOptions>(), It.IsAny<CancellationToken>()), Times.Never);
+            providerManager.Verify(p => p.GetImageProviders(It.IsAny<BaseItem>(), It.IsAny<ImageRefreshOptions>()), Times.Never);
+        }
+
+        [Fact]
+        public async Task RefreshMetadata_MediaInfoOnly_ProbeFailureDoesNotSaveOrAdvanceRefreshDate()
+        {
+            var item = NewStampedTestItem();
+            var stampBefore = item.DateLastRefreshed;
+            var probe = new Mock<ICustomMetadataProvider<TestItem>>();
+            probe.As<IMediaInfoProvider>();
+            probe.Setup(p => p.FetchAsync(item, It.IsAny<MetadataRefreshOptions>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new InvalidOperationException("probe failed"));
+            var service = NewService(NewProviderManager([probe.Object]));
+
+            var result = await service.RefreshMetadata(
+                item,
+                new MetadataRefreshOptions(Mock.Of<IDirectoryService>()) { RefreshMediaInfoOnly = true },
+                CancellationToken.None).ConfigureAwait(true);
+
+            Assert.Equal(ItemUpdateType.None, result);
+            Assert.False(item.Saved);
+            Assert.Equal(stampBefore, item.DateLastRefreshed);
+        }
+
+        [Fact]
+        public void MetadataRefreshOptions_Copy_PreservesMediaInfoOnly()
+        {
+            var options = new MetadataRefreshOptions(Mock.Of<IDirectoryService>()) { RefreshMediaInfoOnly = true };
+
+            Assert.True(new MetadataRefreshOptions(options).RefreshMediaInfoOnly);
+            Assert.True(new MetadataRefreshOptions(options, Mock.Of<IDirectoryService>()).RefreshMediaInfoOnly);
+        }
+
+        [Theory]
         [InlineData(true, "/media/movie.mkv", false)]
         [InlineData(true, "/media/movie.strm", true)]
         [InlineData(false, "/media/movie.mkv", true)]

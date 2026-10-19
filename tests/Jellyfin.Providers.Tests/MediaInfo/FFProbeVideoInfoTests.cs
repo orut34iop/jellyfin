@@ -101,6 +101,26 @@ public class FFProbeVideoInfoTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public void FetchEmbeddedInfo_PlaybackProbe_PreservesEditedAndEmptyFields(bool emptyGenres)
+    {
+        var video = new Video { Name = "Edited title", Genres = emptyGenres ? [] : ["Edited genre"] };
+        var data = CreateMediaInfoWithDates();
+        data.Name = "Embedded title";
+        data.Genres = ["Embedded genre"];
+        var options = CreateRefreshOptions(false);
+        options.RefreshMediaInfoOnly = true;
+
+        _fFProbeVideoInfo.FetchEmbeddedInfo(video, data, options, new LibraryOptions { EnableEmbeddedTitles = true });
+
+        Assert.Equal("Edited title", video.Name);
+        Assert.Equal(emptyGenres ? Array.Empty<string>() : ["Edited genre"], video.Genres);
+        Assert.Null(video.ProductionYear);
+        Assert.Null(video.PremiereDate);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public void FetchEmbeddedInfo_Extra_IgnoresContainerDates(bool replaceAllMetadata)
     {
         var video = new Video
@@ -167,8 +187,10 @@ public class FFProbeVideoInfoTests
             Times.Never);
     }
 
-    [Fact]
-    public async Task ProbeVideo_LocalMetadataOnlyImportWithRemoteContentProbe_UsesMediaEncoderProbe()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ProbeVideo_LocalMetadataOnlyImportWithRemoteContentProbe_UsesMediaEncoderProbe(bool mediaInfoOnly)
     {
         const long RuntimeTicks = TimeSpan.TicksPerMinute * 90;
 
@@ -192,6 +214,7 @@ public class FFProbeVideoInfoTests
                     It.IsAny<CancellationToken>()))
             .ReturnsAsync(new MediaBrowser.Model.MediaInfo.MediaInfo
             {
+                Genres = ["Embedded genre"],
                 RunTimeTicks = RuntimeTicks,
                 Container = "mkv",
                 MediaStreams = new[]
@@ -210,7 +233,8 @@ public class FFProbeVideoInfoTests
         var prober = CreateFFProbeVideoInfo(mediaEncoder.Object, libraryManager.Object, fileSystem.Object);
         var options = new MetadataRefreshOptions(new DirectoryService(fileSystem.Object))
         {
-            EnableRemoteContentProbe = true
+            EnableRemoteContentProbe = true,
+            RefreshMediaInfoOnly = mediaInfoOnly
         };
 
         var result = await prober.ProbeVideo(video, options, CancellationToken.None);
@@ -218,6 +242,7 @@ public class FFProbeVideoInfoTests
         Assert.Equal(ItemUpdateType.MetadataImport, result);
         Assert.Equal(RuntimeTicks, video.RunTimeTicks);
         Assert.Equal("mkv", video.Container);
+        Assert.Equal(mediaInfoOnly ? Array.Empty<string>() : ["Embedded genre"], video.Genres);
         mediaEncoder.Verify(
             i => i.GetMediaInfo(It.IsAny<MediaInfoRequest>(), It.IsAny<CancellationToken>()),
             Times.Once);

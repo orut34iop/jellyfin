@@ -145,7 +145,7 @@ namespace MediaBrowser.Providers.MediaInfo
             AddExternalLyrics(audio, mediaStreams, options);
             var tryExtractEmbeddedLyrics = mediaStreams.All(s => s.Type != MediaStreamType.Lyric);
 
-            if (!audio.IsLocked)
+            if (!audio.IsLocked && !options.RefreshMediaInfoOnly)
             {
                 await FetchDataFromTags(audio, mediaInfo, options, tryExtractEmbeddedLyrics).ConfigureAwait(false);
                 if (tryExtractEmbeddedLyrics)

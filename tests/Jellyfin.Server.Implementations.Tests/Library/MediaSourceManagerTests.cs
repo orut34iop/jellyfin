@@ -257,8 +257,10 @@ namespace Jellyfin.Server.Implementations.Tests.Library
             return (primary, alt1, alt2);
         }
 
-        [Fact]
-        public async Task GetPlaybackMediaSources_MissingVideoStream_ProbesReturnedMediaSource()
+        [Theory]
+        [InlineData("/media/movie.mp4")]
+        [InlineData("/media/movie.strm")]
+        public async Task GetPlaybackMediaSources_MissingVideoStream_ProbesReturnedMediaSource(string path)
         {
             const long RuntimeTicks = 9_000_000_000;
             const long Size = 123_456_789;
@@ -266,7 +268,7 @@ namespace Jellyfin.Server.Implementations.Tests.Library
             var mediaSource = new MediaSourceInfo
             {
                 Id = "source",
-                Path = "/media/movie.mp4",
+                Path = path,
                 Protocol = MediaProtocol.File,
                 Type = MediaSourceType.Default,
                 ETag = "etag"
@@ -285,7 +287,9 @@ namespace Jellyfin.Server.Implementations.Tests.Library
             providerManager.Setup(
                     i => i.RefreshSingleItem(
                         item,
-                        It.IsAny<MetadataRefreshOptions>(),
+                        It.Is<MetadataRefreshOptions>(options => options.RefreshMediaInfoOnly
+                            && options.EnableRemoteContentProbe
+                            && options.ImageRefreshMode == MetadataRefreshMode.None),
                         It.IsAny<CancellationToken>()))
                 .ReturnsAsync(ItemUpdateType.None);
             BaseItem.ProviderManager = providerManager.Object;
