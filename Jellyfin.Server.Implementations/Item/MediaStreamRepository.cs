@@ -42,7 +42,7 @@ public class MediaStreamRepository : IMediaStreamRepository
         using var transaction = context.Database.BeginTransaction();
 
         context.MediaStreamInfos.Where(e => e.ItemId.Equals(id)).ExecuteDelete();
-        context.MediaStreamInfos.AddRange(streams.Select(f => Map(f, id)));
+        context.MediaStreamInfos.AddRange(streams.Select(f => Map(f, id, _serverApplicationHost)));
         context.SaveChanges();
 
         transaction.Commit();
@@ -64,16 +64,6 @@ public class MediaStreamRepository : IMediaStreamRepository
             .Select(s => string.IsNullOrEmpty(s.Language) ? "und" : s.Language) // und = undetermined
             .Distinct()
             .ToArray();
-    }
-
-    private string? GetPathToSave(string? path)
-    {
-        if (path is null)
-        {
-            return null;
-        }
-
-        return _serverApplicationHost.ReverseVirtualPath(path);
     }
 
     private string? RestorePath(string? path)
@@ -191,7 +181,7 @@ public class MediaStreamRepository : IMediaStreamRepository
         return dto;
     }
 
-    private MediaStreamInfo Map(MediaStream dto, Guid itemId)
+    internal static MediaStreamInfo Map(MediaStream dto, Guid itemId, IServerApplicationHost host)
     {
         var entity = new MediaStreamInfo
         {
@@ -206,7 +196,7 @@ public class MediaStreamRepository : IMediaStreamRepository
             ChannelLayout = dto.ChannelLayout,
             Profile = dto.Profile,
             AspectRatio = dto.AspectRatio,
-            Path = GetPathToSave(dto.Path) ?? dto.Path,
+            Path = dto.Path is null ? null : host.ReverseVirtualPath(dto.Path) ?? dto.Path,
             IsInterlaced = dto.IsInterlaced,
             BitRate = dto.BitRate,
             Channels = dto.Channels,

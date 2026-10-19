@@ -2716,6 +2716,30 @@ namespace Emby.Server.Implementations.Library
         }
 
         /// <inheritdoc />
+        public async Task<bool> SaveMetadataFieldsAsync(BaseItem item, IReadOnlyList<MetadataField> fields, IReadOnlyList<PersonInfo> people, CancellationToken cancellationToken)
+        {
+            if (!await _persistenceService.SaveMetadataFieldsAsync(item, fields, people, cancellationToken).ConfigureAwait(false))
+            {
+                return false;
+            }
+
+            _cache.TryRemove(item.Id, out _);
+            if (item.GetParent() is Folder parent)
+            {
+                parent.Children = null;
+                parent.UserData = null;
+            }
+
+            // NFO is a best-effort mirror of the committed database, never an unlock/refresh step.
+            if (item.IsFileProtocol && !LocalMetadataOnlyImportPolicy.IsEnabledForItem(item, this))
+            {
+                await ProviderManager.SaveMetadataAsync(item, ItemUpdateType.MetadataEdit).ConfigureAwait(false);
+            }
+            ReportItemsUpdated([item], item.GetParent(), ItemUpdateType.MetadataEdit);
+            return true;
+        }
+
+        /// <inheritdoc />
         public async Task UpdateItemsAsync(IReadOnlyList<BaseItem> items, BaseItem parent, ItemUpdateType updateReason, CancellationToken cancellationToken)
         {
             if (updateReason == ItemUpdateType.MediaInfo)

@@ -86,6 +86,113 @@ namespace MediaBrowser.Providers.Manager
             }
         }
 
+        /// <inheritdoc />
+        public async Task<MetadataResetResult> ResetMetadata(BaseItem item, MediaBrowser.Model.Dto.MetadataResetRequest request, CancellationToken cancellationToken)
+        {
+            if (request.Fields is not { Length: > 0 } || request.Fields.Any(field => !Enum.IsDefined(field))
+                || string.IsNullOrWhiteSpace(request.ProviderName))
+            {
+                return MetadataResetResult.InvalidRequest;
+            }
+
+            using var metadataLock = await MetadataUpdateLock.AcquireAsync(item.Id, cancellationToken).ConfigureAwait(false);
+            if (LibraryManager.GetItemById(item.Id) is not TItemType current)
+            {
+                return MetadataResetResult.NotFound;
+            }
+
+            if (request.Fields.Contains(MetadataField.Cast) && !current.SupportsPeople)
+            {
+                return MetadataResetResult.InvalidRequest;
+            }
+
+            var directory = new DirectoryService(FileSystem);
+            var selection = current.CreateMetadataCopy();
+            selection.IsLocked = false;
+            var providers = ProviderManager.GetMetadataProviders<TItemType>(selection, LibraryManager.GetLibraryOptions(current), new MetadataRefreshOptions(directory))
+                .Where(provider => string.Equals(provider.Name, request.ProviderName, StringComparison.Ordinal)
+                    && (request.Remote ? provider is IRemoteMetadataProvider<TItemType, TIdType> : provider is ILocalMetadataProvider<TItemType>))
+                .ToArray();
+            if (providers.Length != 1)
+            {
+                return MetadataResetResult.InvalidRequest;
+            }
+
+            var lookup = current.GetLookupInfo();
+            lookup.ProviderIds = new Dictionary<string, string>(lookup.ProviderIds, StringComparer.OrdinalIgnoreCase);
+            if (lookup is EpisodeInfo episode)
+            {
+                episode.SeriesProviderIds = new Dictionary<string, string>(episode.SeriesProviderIds, StringComparer.OrdinalIgnoreCase);
+                episode.SeasonProviderIds = new Dictionary<string, string>(episode.SeasonProviderIds, StringComparer.OrdinalIgnoreCase);
+            }
+            else if (lookup is SeasonInfo season)
+            {
+                season.SeriesProviderIds = new Dictionary<string, string>(season.SeriesProviderIds, StringComparer.OrdinalIgnoreCase);
+            }
+
+            MetadataResult<TItemType> source;
+            try
+            {
+                source = request.Remote
+                    ? await ((IRemoteMetadataProvider<TItemType, TIdType>)providers[0]).GetMetadata(lookup, cancellationToken).ConfigureAwait(false)
+                    : await ((ILocalMetadataProvider<TItemType>)providers[0]).GetMetadata(new ItemInfo(current), directory, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                Logger.LogWarning("Metadata reset provider failed for item {ItemId}", current.Id);
+                return MetadataResetResult.ProviderFailed;
+            }
+
+            if (source?.HasMetadata != true || source.Item is null)
+            {
+                return MetadataResetResult.NoMetadata;
+            }
+
+            var replacement = (TItemType)current.CreateMetadataCopy();
+            foreach (var field in request.Fields.Distinct())
+            {
+                var empty = field switch
+                {
+                    MetadataField.Genres => source.Item.Genres.Length == 0,
+                    MetadataField.ProductionLocations => source.Item.ProductionLocations.Length == 0,
+                    MetadataField.Studios => source.Item.Studios.Length == 0,
+                    MetadataField.Tags => source.Item.Tags.Length == 0,
+                    MetadataField.Name => string.IsNullOrWhiteSpace(source.Item.Name),
+                    MetadataField.Overview => string.IsNullOrWhiteSpace(source.Item.Overview),
+                    MetadataField.OfficialRating => string.IsNullOrWhiteSpace(source.Item.OfficialRating),
+                    MetadataField.Runtime => !source.Item.RunTimeTicks.HasValue,
+                    MetadataField.Cast => source.People is not { Count: > 0 },
+                    _ => true
+                };
+                // An item must always retain a usable name. Other absent source fields can only be
+                // cleared when the caller explicitly accepts the provider's empty/omitted values.
+                if (empty && (!request.AllowEmptyValues || field == MetadataField.Name))
+                {
+                    return MetadataResetResult.NoMetadata;
+                }
+
+                switch (field)
+                {
+                    case MetadataField.Genres: replacement.Genres = source.Item.Genres; break;
+                    case MetadataField.ProductionLocations: replacement.ProductionLocations = source.Item.ProductionLocations; break;
+                    case MetadataField.Studios: replacement.Studios = source.Item.Studios; break;
+                    case MetadataField.Tags: replacement.Tags = source.Item.Tags; break;
+                    case MetadataField.Name: replacement.Name = source.Item.Name; break;
+                    case MetadataField.Overview: replacement.Overview = source.Item.Overview; break;
+                    case MetadataField.OfficialRating: replacement.OfficialRating = source.Item.OfficialRating; break;
+                    case MetadataField.Runtime: replacement.RunTimeTicks = source.Item.RunTimeTicks; break;
+                }
+            }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            return await LibraryManager.SaveMetadataFieldsAsync(replacement, request.Fields, source.People ?? [], cancellationToken).ConfigureAwait(false)
+                ? MetadataResetResult.Success : MetadataResetResult.NotFound;
+        }
+
         public virtual async Task<ItemUpdateType> RefreshMetadata(BaseItem item, MetadataRefreshOptions refreshOptions, CancellationToken cancellationToken)
         {
             using var metadataLock = await MetadataUpdateLock.AcquireAsync(item.Id, cancellationToken).ConfigureAwait(false);
@@ -94,6 +201,25 @@ namespace MediaBrowser.Providers.Manager
                 item = currentItem;
             }
 
+            item.PendingMediaInfo = null;
+            var before = item.CreateMetadataCopy();
+            try
+            {
+                return await RefreshMetadataCore(item, refreshOptions, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                RestoreMediaInfo(before, item);
+                throw;
+            }
+            finally
+            {
+                item.PendingMediaInfo = null;
+            }
+        }
+
+        private async Task<ItemUpdateType> RefreshMetadataCore(BaseItem item, MetadataRefreshOptions refreshOptions, CancellationToken cancellationToken)
+        {
             var itemOfType = (TItemType)item;
             if (refreshOptions.RefreshMediaInfoOnly)
             {
@@ -288,6 +414,7 @@ namespace MediaBrowser.Providers.Manager
 
         private async Task<ItemUpdateType> RefreshMediaInfo(TItemType item, MetadataRefreshOptions options, CancellationToken cancellationToken)
         {
+            var before = item.CreateMetadataCopy();
             if (options.ProbeMissingStreamsOnly)
             {
                 var streamType = item is Audio ? MediaStreamType.Audio : MediaStreamType.Video;
@@ -308,6 +435,12 @@ namespace MediaBrowser.Providers.Manager
             foreach (var provider in providers)
             {
                 await RunCustomProvider(provider, item, item.Path ?? item.Name, options, result, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (result.Failures > 0)
+            {
+                RestoreMediaInfo(before, item);
+                return ItemUpdateType.None;
             }
 
             if (result.UpdateType != ItemUpdateType.None)
@@ -985,9 +1118,37 @@ namespace MediaBrowser.Providers.Manager
             return refreshResult;
         }
 
+        private static void RestoreMediaInfo(BaseItem source, BaseItem target)
+        {
+            target.RunTimeTicks = source.RunTimeTicks;
+            target.TotalBitrate = source.TotalBitrate;
+            target.Container = source.Container;
+            target.Size = source.Size;
+            target.Width = source.Width;
+            target.Height = source.Height;
+            target.ShortcutPath = source.ShortcutPath;
+            target.PendingMediaInfo = source.PendingMediaInfo;
+            if (source is Video oldVideo && target is Video video)
+            {
+                video.Timestamp = oldVideo.Timestamp;
+                video.Video3DFormat = oldVideo.Video3DFormat;
+                video.DefaultVideoStreamIndex = oldVideo.DefaultVideoStreamIndex;
+                video.HasSubtitles = oldVideo.HasSubtitles;
+                video.SubtitleFiles = oldVideo.SubtitleFiles;
+                video.AudioFiles = oldVideo.AudioFiles;
+            }
+
+            if (source is Audio oldAudio && target is Audio audio)
+            {
+                audio.HasLyrics = oldAudio.HasLyrics;
+                audio.LyricFiles = oldAudio.LyricFiles;
+            }
+        }
+
         private async Task RunCustomProvider(ICustomMetadataProvider<TItemType> provider, TItemType item, string logName, MetadataRefreshOptions options, RefreshResult refreshResult, CancellationToken cancellationToken)
         {
             Logger.LogDebug("Running {Provider} for {Item}", provider.GetType().Name, logName);
+            var before = provider is IMediaInfoProvider ? item.CreateMetadataCopy() : null;
 
             try
             {
@@ -995,10 +1156,20 @@ namespace MediaBrowser.Providers.Manager
             }
             catch (OperationCanceledException)
             {
+                if (before is not null)
+                {
+                    RestoreMediaInfo(before, item);
+                }
+
                 throw;
             }
             catch (Exception ex)
             {
+                if (before is not null)
+                {
+                    RestoreMediaInfo(before, item);
+                }
+
                 refreshResult.Failures++;
                 refreshResult.ErrorMessage = ex.Message;
                 Logger.LogError(ex, "Error in {Provider} for {Item}", provider.Name, logName);

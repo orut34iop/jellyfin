@@ -61,6 +61,35 @@ public class ItemUpdateController : BaseJellyfinApiController
         _serverConfigurationManager = serverConfigurationManager;
     }
 
+    /// <summary>Resets selected metadata fields from one enabled source, retaining all existing locks.</summary>
+    /// <param name="itemId">The item id.</param>
+    /// <param name="request">The explicit source and field selection.</param>
+    /// <returns>The synchronous reset outcome.</returns>
+    [HttpPost("Items/{itemId}/Metadata/Reset")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    [ProducesResponseType(StatusCodes.Status502BadGateway)]
+    public async Task<ActionResult> ResetMetadata([FromRoute, Required] Guid itemId, [FromBody, Required] MetadataResetRequest request)
+    {
+        var item = _libraryManager.GetItemById<BaseItem>(itemId, User.GetUserId());
+        if (item is null)
+        {
+            return NotFound();
+        }
+
+        var result = await _providerManager.ResetMetadata(item, request, HttpContext.RequestAborted).ConfigureAwait(false);
+        return result switch
+        {
+            MetadataResetResult.Success => NoContent(),
+            MetadataResetResult.NotFound => NotFound(),
+            MetadataResetResult.NoMetadata => UnprocessableEntity(),
+            MetadataResetResult.ProviderFailed => StatusCode(StatusCodes.Status502BadGateway),
+            _ => BadRequest()
+        };
+    }
+
     /// <summary>
     /// Updates an item.
     /// </summary>

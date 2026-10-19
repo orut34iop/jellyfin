@@ -10,6 +10,10 @@ namespace MediaBrowser.Controller.Providers
 {
     public interface IMetadataService
     {
+        /// <summary>Retrieves and atomically replaces selected metadata fields, retaining locks.</summary>
+        Task<MetadataResetResult> ResetMetadata(BaseItem item, MediaBrowser.Model.Dto.MetadataResetRequest request, CancellationToken cancellationToken)
+            => Task.FromResult(MetadataResetResult.InvalidRequest);
+
         /// <summary>
         /// Gets the order.
         /// </summary>

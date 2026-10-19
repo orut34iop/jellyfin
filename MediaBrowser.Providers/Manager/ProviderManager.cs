@@ -169,6 +169,14 @@ namespace MediaBrowser.Providers.Manager
             ClearMetadataProviderCache();
         }
 
+        /// <inheritdoc />
+        public Task<MetadataResetResult> ResetMetadata(BaseItem item, MediaBrowser.Model.Dto.MetadataResetRequest request, CancellationToken cancellationToken)
+        {
+            var service = _metadataServices.FirstOrDefault(current => current.CanRefreshPrimary(item.GetType()))
+                ?? _metadataServices.FirstOrDefault(current => current.CanRefresh(item));
+            return service?.ResetMetadata(item, request, cancellationToken) ?? Task.FromResult(MetadataResetResult.InvalidRequest);
+        }
+
         /// <inheritdoc/>
         public Task<ItemUpdateType> RefreshSingleItem(BaseItem item, MetadataRefreshOptions options, CancellationToken cancellationToken)
         {

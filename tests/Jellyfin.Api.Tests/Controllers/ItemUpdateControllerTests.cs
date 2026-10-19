@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Api.Controllers;
 using MediaBrowser.Controller.Configuration;
@@ -10,6 +11,8 @@ using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Globalization;
 using MediaBrowser.Model.IO;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Moq;
 using Xunit;
 
@@ -27,6 +30,28 @@ public class ItemUpdateControllerTests
             Mock.Of<IProviderManager>(),
             Mock.Of<ILocalizationManager>(),
             Mock.Of<IServerConfigurationManager>());
+    }
+
+    [Theory]
+    [InlineData(MetadataResetResult.Success, 204)]
+    [InlineData(MetadataResetResult.NotFound, 404)]
+    [InlineData(MetadataResetResult.InvalidRequest, 400)]
+    [InlineData(MetadataResetResult.NoMetadata, 422)]
+    [InlineData(MetadataResetResult.ProviderFailed, 502)]
+    public async Task ResetMetadata_ReturnsSynchronousOutcome(MetadataResetResult outcome, int status)
+    {
+        var item = new Movie { Id = Guid.NewGuid() };
+        var library = new Mock<ILibraryManager>();
+        library.Setup(l => l.GetItemById<BaseItem>(item.Id, It.IsAny<Guid>())).Returns(item);
+        var providers = new Mock<IProviderManager>();
+        var request = new MetadataResetRequest { Fields = [MetadataField.Genres], ProviderName = "Nfo" };
+        providers.Setup(p => p.ResetMetadata(item, request, It.IsAny<CancellationToken>())).ReturnsAsync(outcome);
+        var controller = new ItemUpdateController(Mock.Of<IFileSystem>(), library.Object, providers.Object, Mock.Of<ILocalizationManager>(), Mock.Of<IServerConfigurationManager>())
+        {
+            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+        };
+        var result = Assert.IsAssignableFrom<StatusCodeResult>(await controller.ResetMetadata(item.Id, request));
+        Assert.Equal(status, result.StatusCode);
     }
 
     [Fact]

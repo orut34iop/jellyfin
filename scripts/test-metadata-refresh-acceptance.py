@@ -268,6 +268,60 @@ def main():
         written = save_path.read_text(encoding="utf-8-sig")
         assert "类型-" in written and "ProductionLocations" in written and "Writable again" in written
         passed("NFO write denial is logged; committed values survive stale NFO refresh; later successful save contains values and locks")
+        # Explicit resets are synchronous and preserve locks, other fields and version links.
+        reset_id = ids["A"]
+        before = get(reset_id)
+        assert "MetadataRevision" not in before
+        request = {"ProviderName": "Nfo", "Fields": ["Genres", "ProductionLocations"]}
+
+        def expect_reset_error(code, payload):
+            try:
+                api(f"/Items/{reset_id}/Metadata/Reset", "POST", payload)
+            except urllib.error.HTTPError as error:
+                assert error.code == code, (error.code, error.read().decode())
+            else:
+                raise AssertionError("Expected reset error " + str(code))
+
+        expect_reset_error(400, dict(request, ProviderName="Missing provider"))
+        api(f"/Items/{reset_id}/Metadata/Reset", "POST", request)
+        after = get(reset_id)
+        assert after["Genres"] == ["Original"] and after["ProductionLocations"] == ["Original"]
+        for field in ("LockedFields", "LockData", "Name", "Overview", "MediaSourceCount"):
+            assert after.get(field) == before.get(field), field
+        reset_nfo = root / "movies/A/movie.nfo"
+        original_reset_nfo = reset_nfo.read_bytes()
+        try:
+            reset_nfo.write_text('<movie><title>A</title><genre>Replacement</genre></movie>')
+            expect_reset_error(422, request)
+            assert get(reset_id)["Genres"] == ["Original"]
+            edit(reset_id, LockData=True)
+            api(f"/Items/{reset_id}/Metadata/Reset", "POST", dict(request, AllowEmptyValues=True))
+            after = get(reset_id)
+            assert after["Genres"] == ["Replacement"] and not after.get("ProductionLocations")
+            assert after["LockData"] and after["LockedFields"] == before["LockedFields"]
+            reset_nfo.write_text('<movie><invalid')
+            expect_reset_error(422, request)
+            assert get(reset_id)["Genres"] == ["Replacement"]
+        finally:
+            reset_nfo.write_bytes(original_reset_nfo)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(api, f"/Items/{reset_id}/Metadata/Reset", "POST", request),
+                       pool.submit(api, f"/Items/{reset_id}/Refresh?metadataRefreshMode=FullRefresh&replaceAllMetadata=true", "POST")]
+            for future in futures:
+                future.result()
+        assert get(reset_id)["Genres"] == ["Original"]
+        assert get(reset_id)["LockData"]
+        passed("Atomic source reset preserves locks and other fields, rejects empty/failed sources, supports explicit clearing and coexists with refresh; legacy edits need no version")
+        # A reset commits the database before attempting the NFO mirror.
+        nfo(save_path, "movie", "Save Failure", '<genre>Reset source</genre>')
+        saved.chmod(0o500)
+        try:
+            api(f"/Items/{ids['Save Failure']}/Metadata/Reset", "POST", {"ProviderName": "Nfo", "Fields": ["Genres"]})
+            value = get(ids["Save Failure"])
+            assert "Reset source" in value["Genres"] and "Genres" in value["LockedFields"]
+        finally:
+            saved.chmod(0o700)
+        passed("NFO save failure after explicit reset does not roll back the committed protected database values")
         completed = True
     finally:
         saved.chmod(0o700)

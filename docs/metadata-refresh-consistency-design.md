@@ -143,7 +143,7 @@ Shared policy must cover refresh entry points, provider writes, parent inheritan
 
 The suggested sequence is to read the current item and target source, determine required information and its validity, choose the minimum retrieval scope, obtain results in temporary state, check whether values, locks, or source identity changed before committing, write only fields allowed by the operation, and invalidate or synchronize the affected caches.
 
-Long network or ffprobe work should not hold a database write transaction. Existing item coordination or optimistic revision checks may implement concurrency control, but must demonstrate that an earlier refresh cannot overwrite a later edit, an old source result cannot be committed to a new source, and duplicate requests cannot cause unbounded duplicate probing. On conflict, reread and reassess or discard stale results.
+Long network or ffprobe work should not hold a database write transaction. Existing item coordination implements concurrency control; this implementation deliberately does not add revision checks to client DTOs. It must demonstrate that an earlier refresh cannot overwrite a later edit, an old source result cannot be committed to a new source, and duplicate requests cannot cause unbounded duplicate probing. On conflict, reread and reassess or discard stale results.
 
 Playback probing must not advance the timestamp meaning that descriptive metadata was refreshed. Use suitable independent state if probe freshness must be persisted. Failed probes remain retryable without retrying indefinitely on every request. Logging should distinguish reads, probes, descriptive refreshes, skipped protected writes, and explicit resets without recording tokens or credential-bearing remote URLs.
 
@@ -248,11 +248,11 @@ For explicit revalidation, an authorized administrator can call `POST /Items/{it
 
 Normal playback does not inspect a symlink target or STRM file on every read to determine freshness. Source changes are discovered through the existing scan/monitor refresh path, or an explicit revalidation request. A `FileExists` failure during video refresh no longer deletes an owned video or trims its local-version list; deletion remains the responsibility of successful library reconciliation or explicit deletion.
 
-The technical persistence path preserves committed descriptive fields and version data even when passed a stale item instance. Streams, attachments, and chapters still use their existing repositories: this is not yet a single transaction spanning all technical tables. The implementation rejects invalid/obsolete probe results before applying them, retains attachments and chapters during subtitle-only maintenance, and does not claim crash atomicity across all repositories.
+The technical persistence path preserves committed descriptive fields and version data even when passed a stale item instance. The advanced consistency implementation below now stages streams, attachments and chapters and commits them together with technical scalars in one SQLite transaction. Subtitle-only maintenance retains unselected collections. Direct plugin repository writes are outside this path.
 
 After technical persistence, cached item and parent state is invalidated and the existing item-updated event is emitted. Refreshes and owned-item inheritance reread the current item after acquiring its lock; folder lock propagation also rereads each destination.
 
-The keyed lock is process-local coordination, not a database transaction held during network access. It also covers owned-item inheritance writes and existing folder lock propagation, but does not authorize claims about plugins that bypass standard entry points. Explicit protected-field reset, comprehensive failure atomicity, library recovery, and the full acceptance matrix still require their own implementation or verification; they must not be inferred from the playback fix.
+The keyed lock is process-local coordination, not a database transaction held during network access. It also covers owned-item inheritance writes and existing folder lock propagation, but does not authorize claims about plugins that bypass standard entry points. Explicit protected-field reset and the technical transaction are implemented separately below. Library recovery and the full acceptance matrix still require their own verification; they must not be inferred from the playback fix.
 
 ## Validation and review record
 
@@ -273,7 +273,7 @@ An isolated server and database passed eight real-media checks: ordinary STRM an
 
 Two iterative reviews accompanied implementation. The first traced refresh entry points, inheritance, persistence and cache handling against R1–R9; it identified the need for technical-only persistence and rereading destination locks after item coordination. The second compared test evidence and both documents against T01–T22, corrected test fixtures for refreshed item lookup, and kept unverified claims out of the completion status. These were implementation self-reviews, not independent maintainer approval.
 
-The eight checks and automated tests cover the reported movie workflow; they do not certify every subcase in T01–T22. The extended acceptance below adds TV recursion, multipart, group mutation concurrency and NFO-saver failure checks. Remaining work includes atomic protected-field reset, external provider failure combinations, recovery manifests, and crash atomicity across technical repositories. Existing full DTO requests also cannot prevent a caller from submitting an already stale snapshot without an API revision contract. These limits must accompany any upstream submission.
+The eight checks and automated tests cover the reported movie workflow; they do not certify every subcase in T01–T22. The extended acceptance below adds TV recursion, multipart, group mutation concurrency and NFO-saver failure checks. The subsequent advanced consistency section covers atomic protected-field reset and technical-table crash rollback. Arbitrary external provider failure combinations and library recovery remain outside these checks. By explicit compatibility decision, full DTO writes do not gain revision tokens or stale-client rejection. A stale client can still overwrite an earlier explicit edit; this is a documented exclusion rather than an unfinished revision feature. These limits must accompany any upstream submission.
 
 The correct external toolkit is Emby115Toolkit; the initially supplied nas-ai-tools checkout was unrelated to these API operations. Integration is now implemented in `MediaServerClient._save_curated_field`: each actual genre or location translation/deduplication saves its value and corresponding lock using the current full DTO, preserves all existing locks and `LockData`, and verifies the value and every submitted lock by reading the item back. Unconfirmed protected writes are reported as failures without replaying a stale full DTO. Emby retains its existing behavior. Existing unchanged Chinese values and empty values are not automatically locked; only deliberate cleanup that produces an empty result gains protection. Historical backfill is now implemented as a separate read-only preview and explicit apply workflow: select item IDs or library IDs and fields, back up current values/locks, and verify every write without translating values. No real library values or locks were batch changed.
 
@@ -312,3 +312,65 @@ The generated-media HTTP run passed six grouped checks: (1) Series/Season/Episod
 Two follow-up implementation self-reviews checked lock boundaries/failure paths and then source enumeration/documentation consistency. The second found and corrected the mixed automatic/manual version-group case. They are not independent upstream approval. Windows-specific NFO replacement behavior, network-filesystem rename semantics, process-crash group repair, full DTO revision conflicts and cross-repository crash atomicity remain outside this run. No real library curation, refresh, merge, split or lock backfill was executed.
 
 Local delivery: `12.0.0-20261019194904` was built and installed with the valid Apple development certificate. Thirteen launcher checks and nine network-configuration tests passed. Installed signature verification, HTTP 200, timestamped public version, visible status item/menu entries, launcher/server parent-child ownership and graceful exit/relaunch passed; the login preference remained unchanged. These read-only service checks did not initiate library maintenance.
+
+
+The advanced consistency work is described below. Earlier validation totals refer to their dated implementation snapshots.
+
+
+## Advanced consistency and compatibility decision — 2026-10-19
+
+The existing `POST /Items/{itemId}` contract remains compatible. No metadata revision property, required version header, HTTP 412/428 behavior or automatic stale-DTO retry is added. Emby115Toolkit does not need a version-token upgrade. Refresh/edit coordination still uses the existing per-item lock and rereads the current item after acquiring it. This prevents overlapping standard server operations from committing a pre-lock snapshot, but deliberately does not detect a client that fetched a full DTO earlier and submits it later. Last accepted explicit edits retain their existing behavior.
+
+### Atomic reset from a selected source
+
+A new administrator-only synchronous endpoint, `POST /Items/{itemId}/Metadata/Reset`, accepts:
+
+```json
+{
+  "ProviderName": "Nfo",
+  "Remote": false,
+  "Fields": ["Genres", "ProductionLocations"],
+  "AllowEmptyValues": false
+}
+```
+
+`ProviderName` must identify exactly one enabled provider of the selected local/remote kind for that item. Library provider restrictions still apply. An item's whole-item lock does not block this explicit administrator edit; its stored lock is never removed. Supported fields are `Genres`, `ProductionLocations`, `Studios`, `Tags`, `Name`, `Overview`, `OfficialRating`, `Runtime` and `Cast` (only for items supporting people). Only the addressed item is reset: there is no implicit recursion, group-member expansion, identity change, image refresh or re-probe.
+
+The service acquires the item lock, rereads the item, obtains source metadata without a database write transaction, and prepares a separate replacement item. Lookup provider-ID dictionaries are detached before a remote provider can modify them. It validates all selected values before any persistence. It then commits only selected scalar/JSON properties, corresponding genre/studio/tag indexes and selected cast mappings in one transaction. Existing field locks, the whole-item lock, unselected fields, media streams and version relationships remain unchanged. Cached items are invalidated after commit. There is no unlock/queue/relock interval.
+
+An empty or omitted selected source value rejects the entire reset by default. `AllowEmptyValues: true` explicitly permits clearing those fields; an empty title is always rejected. The common provider contract does not distinguish every absent NFO tag from an intentionally empty value, so callers must not enable clearing casually. No matching metadata still fails even when clearing is allowed. A provider may report a malformed/unreadable NFO as missing metadata (422); an uncaught retrieval exception becomes 502. Neither outcome saves the prepared values. Cancellation or a database failure before commit rolls back all selected fields and indexes.
+
+| HTTP result | Meaning |
+| --- | --- |
+| 204 | Database reset committed, rather than merely queued. |
+| 400 | Invalid fields, unsupported item capability, or missing/ambiguous/disabled provider selection. |
+| 404 | Item disappeared or its source identity no longer matches at commit. |
+| 422 | No usable metadata or a selected value is empty without permission to clear. |
+| 502 | Provider retrieval threw an exception. |
+
+After the database commit, enabled NFO savers may mirror the new values under the existing library rules. Their failures are logged and do not undo the committed database reset or remove protection. Database and filesystem writes are not one transaction. A canceled HTTP connection near commit can leave the caller uncertain; reread the item before deciding to repeat a reset. Ordinary old-client editing keeps its existing endpoint and behavior.
+
+### Technical database transaction
+
+Built-in video and audio probes stage streams, attachments and chapters on a transient, nonserialized snapshot. A null collection means retain existing rows; an empty collection means clear that collection. The technical save commits item runtime/bitrate/dimensions and allowlisted JSON properties together with the staged collections. The ordinary full-item persistence path also consumes the snapshot within its existing transaction. Provider failures restore staged technical in-memory state; refresh cleanup discards pending data. Probing/network work does not hold a database write transaction.
+
+Tests inject a failed insert after deletes and check all old rows and scalar values, including a normal full-item save. Separate child-process tests kill the writer after each technical-table delete and immediately before commit, reopen a private file-backed SQLite database, and verify the complete previous snapshot. Successful commit and retain-versus-clear semantics have separate tests. This establishes process-crash rollback for the standard SQLite path; it does not promise cross-filesystem atomicity, physical power-loss durability, multi-item merge/split rollback, or protection for plugins that bypass these services.
+
+### Upstream delivery status
+
+Two focused candidates are based on official `master` at `08c2ba6e0b6499122822f1c5b18bc426104538b4` and pushed to the contributor fork:
+
+| Candidate | Commit / branch | Validation |
+| --- | --- | --- |
+| Preserve the old NFO if saving fails | [`d65043f4b0`](https://github.com/orut34iop/jellyfin/commit/d65043f4b0), `codex/upstream-nfo-atomic-save` | 43 XbmcMetadata tests passed. |
+| Do not append old source collections when fetching missing metadata | [`7efec6e9d2`](https://github.com/orut34iop/jellyfin/commit/7efec6e9d2), `codex/upstream-preserve-metadata-collections` | 516 Providers tests passed. |
+
+Neither candidate is an upstream PR yet or has maintainer approval. Jellyfin's [LLM contribution policy](https://jellyfin.org/docs/general/contributing/llm-policies/) requires human review, understanding and the submitter's own explanation in PR bodies; an explicitly disclosed translation of human-written text is allowed. The submitter's review and text have been requested before posting. The generated design documents are working/reference materials, not text to paste as a PR body or issue.
+
+Playback scope/field protection, technical transaction support, group coordination, and the new reset API must remain separate review scopes. The latter API and transaction refactor need design discussion under the upstream contribution workflow before claiming upstream acceptance. The remaining broader changes have not yet been ported into independently validated upstream branches. Local deployment or tests do not close these upstream tasks.
+
+### Advanced consistency validation
+
+The affected suites passed **1,934 tests**, with 13 existing platform skips: Providers 544, Controller 223, Server Implementations 936, API 188 and XbmcMetadata 43. This includes four forced-process-termination recovery cases, transaction rollback for normal and technical saves, cast/scalar reset rollback, preserved stored locks, provider failure/cancellation cleanup, and API status mapping. The isolated HTTP script passed all eight grouped checks, adding source-reset success/empty-source/failed-source/refresh-concurrency cases and committed resets with an unwritable NFO. All fixtures use generated media and independent databases; no real-library curation, refresh, merge, split or protection backfill was executed.
+
+Two implementation review passes checked (1) transaction ownership, provider failure and cancellation state, and (2) field scope, lookup dictionary aliasing and bilingual documentation. They removed unrelated image-saving/full-item mapping from reset and isolated lookup dictionaries. These are local self-reviews, not independent upstream review. Remote source selection/failure is covered with provider mocks; real external metadata services and every reset field on every media type were not exhaustively exercised.

@@ -134,10 +134,10 @@ namespace MediaBrowser.Providers.MediaInfo
                 item.RunTimeTicks = null;
                 item.TotalBitrate = null;
                 item.Container = null;
-                _mediaStreamRepository.SaveMediaStreams(item.Id, item.GetMediaStreams().Where(stream => stream.IsExternal).ToArray(), cancellationToken);
+                item.PendingMediaInfo = new MediaInfoSnapshot { Streams = item.GetMediaStreams().Where(stream => stream.IsExternal).ToArray() };
                 if (item is AudioBook)
                 {
-                    _chapterManager.SaveChapters(item, []);
+                    item.PendingMediaInfo.Chapters = [];
                 }
             }
 
@@ -179,11 +179,11 @@ namespace MediaBrowser.Providers.MediaInfo
 
             audio.HasLyrics = mediaStreams.Any(s => s.Type == MediaStreamType.Lyric);
 
-            _mediaStreamRepository.SaveMediaStreams(audio.Id, mediaStreams, cancellationToken);
+            audio.PendingMediaInfo = new MediaInfoSnapshot { Streams = mediaStreams };
 
             if (audio is AudioBook && mediaInfo.Chapters is { Length: > 0 })
             {
-                _chapterManager.SaveChapters(audio, mediaInfo.Chapters);
+                audio.PendingMediaInfo.Chapters = mediaInfo.Chapters;
             }
         }
 

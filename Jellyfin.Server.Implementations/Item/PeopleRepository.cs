@@ -142,6 +142,12 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
     /// <inheritdoc />
     public void UpdatePeople(Guid itemId, IReadOnlyList<PersonInfo> people)
     {
+        using var context = _dbProvider.CreateDbContext();
+        UpdatePeople(context, itemId, people);
+    }
+
+    internal static void UpdatePeople(JellyfinDbContext context, Guid itemId, IReadOnlyList<PersonInfo> people)
+    {
         foreach (var person in people)
         {
             person.Name = person.Name.Trim();
@@ -159,7 +165,6 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
 
         var distinctPersons = distinctCredits.DistinctBy(e => (e.LoweredName, e.PersonType)).ToArray();
 
-        using var context = _dbProvider.CreateDbContext();
         var existingMaps = context.PeopleBaseItemMap
             .AsNoTracking()
             .Include(e => e.People)
@@ -191,7 +196,7 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
             return;
         }
 
-        using var transaction = context.Database.BeginTransaction();
+        using var transaction = context.Database.CurrentTransaction is null ? context.Database.BeginTransaction() : null;
         // The fast-path snapshot was read before acquiring the write transaction. Reload
         // tracked mappings inside it so a concurrent refresh cannot leave stale credits.
         existingMaps = context.PeopleBaseItemMap
@@ -279,7 +284,7 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
         DeleteCreditsWithoutMapping(context, droppedCredits);
 
         context.SaveChanges();
-        transaction.Commit();
+        transaction?.Commit();
     }
 
     /// <inheritdoc/>
@@ -291,7 +296,7 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
     }
 
     // A null candidate list sweeps every credit, anything else only the ones just unmapped.
-    private int DeleteCreditsWithoutMapping(JellyfinDbContext context, IReadOnlyList<Guid>? candidates)
+    private static int DeleteCreditsWithoutMapping(JellyfinDbContext context, IReadOnlyList<Guid>? candidates)
     {
         if (candidates is not null && candidates.Count == 0)
         {
@@ -417,7 +422,7 @@ public class PeopleRepository(IDbContextFactory<JellyfinDbContext> dbProvider, I
         return personInfo;
     }
 
-    private People Map(PersonInfo people)
+    private static People Map(PersonInfo people)
     {
         var personInfo = new People()
         {

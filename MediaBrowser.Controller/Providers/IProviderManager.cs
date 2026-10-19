@@ -21,6 +21,10 @@ namespace MediaBrowser.Controller.Providers
     /// </summary>
     public interface IProviderManager
     {
+        /// <summary>Retrieves and atomically replaces selected metadata fields, retaining locks.</summary>
+        Task<MetadataResetResult> ResetMetadata(BaseItem item, MediaBrowser.Model.Dto.MetadataResetRequest request, CancellationToken cancellationToken)
+            => Task.FromResult(MetadataResetResult.InvalidRequest);
+
         event EventHandler<GenericEventArgs<BaseItem>> RefreshStarted;
 
         event EventHandler<GenericEventArgs<BaseItem>> RefreshCompleted;

@@ -16,6 +16,7 @@ using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Audio;
 using MediaBrowser.Controller.Persistence;
 using MediaBrowser.Controller.Playlists;
+using MediaBrowser.Model.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using BaseItemDto = MediaBrowser.Controller.Entities.BaseItem;
@@ -180,12 +181,110 @@ public class ItemPersistenceService : IItemPersistenceService
     }
 
     /// <inheritdoc />
+    public async Task<bool> SaveMetadataFieldsAsync(BaseItem item, IReadOnlyList<MetadataField> fields, IReadOnlyList<PersonInfo> people, CancellationToken cancellationToken)
+    {
+        if (fields.Count == 0 || fields.Any(field => !Enum.IsDefined(field)))
+        {
+            throw new ArgumentException("Select valid metadata fields.", nameof(fields));
+        }
+
+        await ItemWriteSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await using var context = await _dbProvider.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+            await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
+            var entity = await context.BaseItems.SingleOrDefaultAsync(e => e.Id == item.Id, cancellationToken).ConfigureAwait(false);
+            if (entity is null || !string.Equals(entity.Path, _appHost.ReverseVirtualPath(item.Path), StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            var storedData = string.IsNullOrEmpty(entity.Data) ? new JsonObject() : JsonNode.Parse(entity.Data)!.AsObject();
+            foreach (var field in fields.Distinct())
+            {
+                switch (field)
+                {
+                    case MetadataField.Name:
+                        entity.Name = item.Name;
+                        entity.CleanName = item.Name.GetCleanValue();
+                        entity.SortName = item.SortName;
+                        break;
+                    case MetadataField.Overview: entity.Overview = item.Overview; break;
+                    case MetadataField.OfficialRating: entity.OfficialRating = item.OfficialRating; break;
+                    case MetadataField.Runtime: entity.RunTimeTicks = item.RunTimeTicks; break;
+                    case MetadataField.ProductionLocations: entity.ProductionLocations = string.Join('|', item.ProductionLocations.Where(p => !string.IsNullOrWhiteSpace(p)).Distinct(StringComparer.OrdinalIgnoreCase)); break;
+                    case MetadataField.Genres:
+                        entity.Genres = string.Join('|', item.Genres.Distinct(StringComparer.OrdinalIgnoreCase));
+                        ReplaceItemValues(context, item.Id, ItemValueType.Genre, item.Genres);
+                        break;
+                    case MetadataField.Studios:
+                        entity.Studios = string.Join('|', item.Studios.Distinct(StringComparer.OrdinalIgnoreCase));
+                        ReplaceItemValues(context, item.Id, ItemValueType.Studios, item.Studios);
+                        break;
+                    case MetadataField.Tags:
+                        entity.Tags = string.Join('|', item.Tags.Distinct(StringComparer.OrdinalIgnoreCase));
+                        ReplaceItemValues(context, item.Id, ItemValueType.Tags, item.Tags);
+                        break;
+                    case MetadataField.Cast: PeopleRepository.UpdatePeople(context, item.Id, people); break;
+                }
+
+                if (field != MetadataField.Cast)
+                {
+                    object? value = field switch
+                    {
+                        MetadataField.Name => item.Name,
+                        MetadataField.Overview => item.Overview,
+                        MetadataField.OfficialRating => item.OfficialRating,
+                        MetadataField.Runtime => item.RunTimeTicks,
+                        MetadataField.Genres => item.Genres,
+                        MetadataField.ProductionLocations => item.ProductionLocations,
+                        MetadataField.Studios => item.Studios,
+                        MetadataField.Tags => item.Tags,
+                        _ => null
+                    };
+                    var property = field == MetadataField.Runtime ? nameof(BaseItem.RunTimeTicks) : field.ToString();
+                    var key = JsonDefaults.Options.PropertyNamingPolicy?.ConvertName(property) ?? property;
+                    storedData[key] = JsonSerializer.SerializeToNode(value, JsonDefaults.Options);
+                }
+            }
+
+            entity.Data = storedData.ToJsonString(JsonDefaults.Options);
+            entity.DateLastSaved = DateTime.UtcNow;
+            await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            item.DateLastSaved = entity.DateLastSaved.Value;
+            return true;
+        }
+        finally
+        {
+            ItemWriteSemaphore.Release();
+        }
+    }
+
+    private static void ReplaceItemValues(JellyfinDbContext context, Guid itemId, ItemValueType type, IReadOnlyList<string> values)
+    {
+        context.ItemValuesMap.Where(m => m.ItemId == itemId && m.ItemValue.Type == type).ExecuteDelete();
+        foreach (var value in values.Where(v => !string.IsNullOrWhiteSpace(v)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var entity = context.ItemValues.SingleOrDefault(v => v.Type == type && v.Value == value);
+            if (entity is null)
+            {
+                entity = new ItemValue { ItemValueId = Guid.NewGuid(), Type = type, Value = value, CleanValue = value.GetCleanValue() };
+                context.ItemValues.Add(entity);
+            }
+
+            context.ItemValuesMap.Add(new ItemValueMap { Item = null!, ItemId = itemId, ItemValue = entity, ItemValueId = entity.ItemValueId });
+        }
+    }
+
+    /// <inheritdoc />
     public async Task SaveMediaInfoAsync(BaseItem item, CancellationToken cancellationToken)
     {
         await ItemWriteSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             await using var context = await _dbProvider.CreateDbContextAsync(cancellationToken).ConfigureAwait(false);
+            await using var transaction = await context.Database.BeginTransactionAsync(cancellationToken).ConfigureAwait(false);
             var entity = await context.BaseItems.SingleOrDefaultAsync(e => e.Id == item.Id, cancellationToken).ConfigureAwait(false);
             if (entity is null || !string.Equals(entity.Path, _appHost.ReverseVirtualPath(item.Path), StringComparison.Ordinal))
             {
@@ -222,7 +321,10 @@ public class ItemPersistenceService : IItemPersistenceService
             entity.Size = item.Size;
             entity.Width = item.Width;
             entity.Height = item.Height;
+            ApplyMediaInfoSnapshot(context, item, cancellationToken);
             await context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+            item.PendingMediaInfo = null;
         }
         finally
         {
@@ -332,7 +434,7 @@ public class ItemPersistenceService : IItemPersistenceService
         using var transaction = context.Database.BeginTransaction();
 
         var ids = tuples.Select(f => f.Item.Id).ToArray();
-        var existingItems = context.BaseItems.WhereOneOrMany(ids, e => e.Id).Select(f => f.Id).ToHashSet();
+        var existingItems = context.BaseItems.WhereOneOrMany(ids, e => e.Id).Select(e => e.Id).ToHashSet();
 
         foreach (var item in tuples)
         {
@@ -751,8 +853,40 @@ public class ItemPersistenceService : IItemPersistenceService
             }
         }
 
+        foreach (var entry in tuples)
+        {
+            ApplyMediaInfoSnapshot(context, entry.Item, cancellationToken);
+        }
+
         context.SaveChanges();
         transaction.Commit();
+        foreach (var item in items)
+        {
+            item.PendingMediaInfo = null;
+        }
+    }
+
+    private void ApplyMediaInfoSnapshot(JellyfinDbContext context, BaseItem item, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var snapshot = item.PendingMediaInfo;
+        if (snapshot?.Streams is not null)
+        {
+            context.MediaStreamInfos.Where(e => e.ItemId == item.Id).ExecuteDelete();
+            context.MediaStreamInfos.AddRange(snapshot.Streams.Select(s => MediaStreamRepository.Map(s, item.Id, _appHost)));
+        }
+
+        if (snapshot?.Attachments is not null)
+        {
+            context.AttachmentStreamInfos.Where(e => e.ItemId == item.Id).ExecuteDelete();
+            context.AttachmentStreamInfos.AddRange(snapshot.Attachments.Select(a => MediaAttachmentRepository.Map(a, item.Id)));
+        }
+
+        if (snapshot?.Chapters is not null)
+        {
+            context.Chapters.Where(e => e.ItemId == item.Id).ExecuteDelete();
+            context.Chapters.AddRange(snapshot.Chapters.Select((c, index) => ChapterRepository.Map(c, index, item.Id)));
+        }
     }
 
     private static List<(ItemValueType MagicNumber, string Value)> GetItemValuesToSave(BaseItemDto item, List<string> inheritedTags)

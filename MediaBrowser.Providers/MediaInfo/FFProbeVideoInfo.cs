@@ -308,11 +308,11 @@ namespace MediaBrowser.Providers.MediaInfo
 
             video.HasSubtitles = mediaStreams.Any(i => i.Type == MediaStreamType.Subtitle);
 
-            _mediaStreamRepository.SaveMediaStreams(video.Id, mediaStreams, cancellationToken);
+            video.PendingMediaInfo = new MediaInfoSnapshot { Streams = mediaStreams };
 
             if (mediaInfo is not null || options.MediaSourceChanged)
             {
-                _mediaAttachmentRepository.SaveMediaAttachments(video.Id, mediaAttachments, cancellationToken);
+                video.PendingMediaInfo.Attachments = mediaAttachments;
             }
 
             if ((mediaInfo is not null || options.MediaSourceChanged) && (options.MetadataRefreshMode == MetadataRefreshMode.FullRefresh
@@ -333,7 +333,7 @@ namespace MediaBrowser.Providers.MediaInfo
 
                 await _chapterManager.RefreshChapterImages(video, options.DirectoryService, chapters, extractDuringScan, false, cancellationToken).ConfigureAwait(false);
 
-                _chapterManager.SaveChapters(video, chapters);
+                video.PendingMediaInfo.Chapters = chapters;
             }
         }
 

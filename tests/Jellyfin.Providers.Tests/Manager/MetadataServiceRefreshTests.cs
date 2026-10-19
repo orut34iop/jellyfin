@@ -13,6 +13,7 @@ using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Persistence;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Configuration;
+using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.IO;
 using MediaBrowser.Providers.Manager;
@@ -101,6 +102,96 @@ namespace Jellyfin.Providers.Tests.Manager
             Assert.Equal(ItemUpdateType.None, result);
             Assert.False(item.Saved);
             Assert.Equal(stampBefore, item.DateLastRefreshed);
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task RefreshMetadata_FailedProbeRestoresTechnicalState(bool cancel)
+        {
+            var item = NewStampedTestItem();
+            item.RunTimeTicks = 42;
+            var probe = new Mock<ICustomMetadataProvider<TestItem>>();
+            probe.As<IMediaInfoProvider>();
+            probe.Setup(p => p.FetchAsync(item, It.IsAny<MetadataRefreshOptions>(), It.IsAny<CancellationToken>()))
+                .Callback(() =>
+                {
+                    item.RunTimeTicks = 99;
+                    item.PendingMediaInfo = new MediaInfoSnapshot { Streams = [] };
+                })
+                .ThrowsAsync(cancel ? new OperationCanceledException() : new InvalidOperationException("failed after staging"));
+            var service = NewService(NewProviderManager([probe.Object]));
+            var work = () => service.RefreshMetadata(item, new MetadataRefreshOptions(Mock.Of<IDirectoryService>()) { RefreshMediaInfoOnly = true }, CancellationToken.None);
+            if (cancel)
+            {
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(work);
+            }
+            else
+            {
+                Assert.Equal(ItemUpdateType.None, await work());
+            }
+
+            Assert.Equal(42, item.RunTimeTicks);
+            Assert.Null(item.PendingMediaInfo);
+            Assert.False(item.Saved);
+        }
+
+        [Theory]
+        [InlineData(false, false, false, false, MetadataResetResult.Success)]
+        [InlineData(true, false, false, false, MetadataResetResult.Success)]
+        [InlineData(false, true, false, false, MetadataResetResult.NoMetadata)]
+        [InlineData(false, true, true, false, MetadataResetResult.Success)]
+        [InlineData(false, false, false, true, MetadataResetResult.ProviderFailed)]
+        public async Task ResetMetadata_RetrievesBeforeSavingAndRetainsProtection(bool remote, bool empty, bool allowEmpty, bool failure, MetadataResetResult expected)
+        {
+            var current = NewStampedTestItem();
+            current.IsLocked = true;
+            current.LockedFields = [MetadataField.Genres, MetadataField.ProductionLocations, MetadataField.Overview];
+            current.Genres = ["Curated"];
+            current.ProductionLocations = ["Curated country"];
+            current.Overview = "Keep";
+            var source = new MetadataResult<TestItem>
+            {
+                HasMetadata = true,
+                Item = new TestItem { Genres = empty ? [] : ["Source"], ProductionLocations = ["Source country"], Overview = "Do not copy" }
+            };
+            var local = new Mock<ILocalMetadataProvider<TestItem>>();
+            local.Setup(p => p.Name).Returns("Source");
+            local.Setup(p => p.GetMetadata(It.IsAny<ItemInfo>(), It.IsAny<IDirectoryService>(), It.IsAny<CancellationToken>()))
+                .Returns(() => failure ? Task.FromException<MetadataResult<TestItem>>(new InvalidOperationException()) : Task.FromResult(source));
+            var online = new Mock<IRemoteMetadataProvider<TestItem, ItemLookupInfo>>();
+            online.Setup(p => p.Name).Returns("Source");
+            online.Setup(p => p.GetMetadata(It.IsAny<ItemLookupInfo>(), It.IsAny<CancellationToken>())).ReturnsAsync(source);
+            var providers = NewProviderManager([local.Object, online.Object]);
+            var library = new Mock<ILibraryManager>();
+            library.Setup(l => l.GetItemById(current.Id)).Returns(current);
+            library.Setup(l => l.GetLibraryOptions(It.IsAny<BaseItem>())).Returns(new LibraryOptions());
+            BaseItem? saved = null;
+            library.Setup(l => l.SaveMetadataFieldsAsync(It.IsAny<BaseItem>(), It.IsAny<IReadOnlyList<MetadataField>>(), It.IsAny<IReadOnlyList<PersonInfo>>(), It.IsAny<CancellationToken>()))
+                .Callback((BaseItem item, IReadOnlyList<MetadataField> _, IReadOnlyList<PersonInfo> _, CancellationToken _) => saved = item)
+                .ReturnsAsync(true);
+            var service = new TestItemMetadataService(library.Object, providers.Object, Mock.Of<IItemRepository>());
+            var request = new MetadataResetRequest
+            {
+                Fields = [MetadataField.Genres, MetadataField.ProductionLocations], ProviderName = "Source", Remote = remote, AllowEmptyValues = allowEmpty
+            };
+            var result = await service.ResetMetadata(current, request, CancellationToken.None);
+            Assert.Equal(expected, result);
+            Assert.Equal(["Curated"], current.Genres);
+            Assert.True(current.IsLocked);
+            if (expected == MetadataResetResult.Success)
+            {
+                Assert.NotNull(saved);
+                Assert.Equal(empty ? [] : new[] { "Source" }, saved.Genres);
+                Assert.Equal(["Source country"], saved.ProductionLocations);
+                Assert.Equal("Keep", saved.Overview);
+                Assert.Equal(current.LockedFields, saved.LockedFields);
+                Assert.True(saved.IsLocked);
+            }
+            else
+            {
+                Assert.Null(saved);
+            }
         }
 
         [Fact]

@@ -93,7 +93,7 @@ public class ChapterRepository : IChapterRepository
         }
     }
 
-    private Chapter Map(ChapterInfo chapterInfo, int index, Guid itemId)
+    internal static Chapter Map(ChapterInfo chapterInfo, int index, Guid itemId)
     {
         return new Chapter()
         {

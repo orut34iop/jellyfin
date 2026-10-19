@@ -10,6 +10,7 @@ using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Configuration;
 using MediaBrowser.Model.Entities;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -48,6 +49,26 @@ public sealed class ItemPersistenceOwnedRowTests : SqliteDbTestFixture
         BaseItem.LibraryManager = _previousLibraryManager!;
         BaseItem.ConfigurationManager = _previousConfigurationManager!;
         base.Dispose(disposing);
+    }
+
+    [Fact]
+    public void SaveItems_TechnicalRowsRollBackWithItemOnFailure()
+    {
+        var item = CreateBook(Guid.NewGuid(), new(), []);
+        item.RunTimeTicks = 1;
+        item.PendingMediaInfo = new MediaInfoSnapshot { Streams = [new MediaStream { Index = 0, Type = MediaStreamType.Audio, Codec = "old" }] };
+        _service.SaveItems([item], CancellationToken.None);
+        using (var context = CreateDbContext())
+        {
+            context.Database.ExecuteSqlRaw("CREATE TRIGGER fail_stream BEFORE INSERT ON MediaStreamInfos BEGIN SELECT RAISE(ABORT, 'injected failure'); END");
+        }
+
+        item.RunTimeTicks = 2;
+        item.PendingMediaInfo = new MediaInfoSnapshot { Streams = [new MediaStream { Index = 0, Type = MediaStreamType.Audio, Codec = "new" }] };
+        Assert.Throws<DbUpdateException>(() => _service.SaveItems([item], CancellationToken.None));
+        using var check = CreateDbContext();
+        Assert.Equal(1, check.BaseItems.Single(e => e.Id.Equals(item.Id)).RunTimeTicks);
+        Assert.Equal("old", check.MediaStreamInfos.Single().Codec);
     }
 
     [Fact]

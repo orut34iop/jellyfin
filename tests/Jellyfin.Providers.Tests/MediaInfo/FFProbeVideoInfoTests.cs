@@ -287,7 +287,8 @@ public class FFProbeVideoInfoTests
         Assert.Equal(TimeSpan.TicksPerHour, video.RunTimeTicks);
         Assert.Equal(["Edited"], video.Genres);
         Assert.False(video.HasSubtitles);
-        streams.Verify(r => r.SaveMediaStreams(video.Id, It.Is<System.Collections.Generic.IReadOnlyList<MediaStream>>(s => s.Count == 1 && s[0].Codec == "h264"), It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal("h264", Assert.Single(video.PendingMediaInfo.Streams!).Codec);
+        streams.VerifyNoOtherCalls();
         encoder.VerifyNoOtherCalls();
         attachments.VerifyNoOtherCalls();
         chapters.VerifyNoOtherCalls();

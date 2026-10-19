@@ -1140,8 +1140,19 @@ namespace MediaBrowser.Controller.Entities
             return PlayAccess.Full;
         }
 
+        /// <summary>Copies an item for a scoped metadata edit without changing the cached instance.</summary>
+        public BaseItem CreateMetadataCopy() => (BaseItem)MemberwiseClone();
+
+        [JsonIgnore]
+        public MediaInfoSnapshot PendingMediaInfo { get; set; }
+
         public virtual IReadOnlyList<MediaStream> GetMediaStreams()
         {
+            if (PendingMediaInfo?.Streams is not null)
+            {
+                return PendingMediaInfo.Streams;
+            }
+
             return MediaSourceManager.GetMediaStreams(new MediaStreamQuery
             {
                 ItemId = Id

@@ -30,6 +30,15 @@ namespace MediaBrowser.Controller.Library
     /// </summary>
     public interface ILibraryManager
     {
+        /// <summary>Atomically saves selected metadata fields without changing protection or relationships.</summary>
+        /// <param name="item">The item containing replacement values.</param>
+        /// <param name="fields">The fields to replace.</param>
+        /// <param name="people">The replacement cast, when selected.</param>
+        /// <param name="cancellationToken">The cancellation token.</param>
+        /// <returns>Whether the existing item was updated.</returns>
+        Task<bool> SaveMetadataFieldsAsync(BaseItem item, IReadOnlyList<MediaBrowser.Model.Entities.MetadataField> fields, IReadOnlyList<PersonInfo> people, CancellationToken cancellationToken)
+            => throw new NotSupportedException();
+
         /// <summary>
         /// Occurs when [item added].
         /// </summary>

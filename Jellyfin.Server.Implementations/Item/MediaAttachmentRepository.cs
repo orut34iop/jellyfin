@@ -65,7 +65,7 @@ public class MediaAttachmentRepository(IDbContextFactory<JellyfinDbContext> dbPr
         };
     }
 
-    private AttachmentStreamInfo Map(MediaAttachment attachment, Guid id)
+    internal static AttachmentStreamInfo Map(MediaAttachment attachment, Guid id)
     {
         return new AttachmentStreamInfo()
         {
