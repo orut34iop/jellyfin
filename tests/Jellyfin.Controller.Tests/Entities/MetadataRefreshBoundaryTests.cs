@@ -56,7 +56,7 @@ public partial class BaseItemTests
             .ReturnsAsync(ItemUpdateType.None);
         BaseItem.ProviderManager = provider.Object;
         var parent = new OwnedItem { Genres = ["Original"], ProductionLocations = ["Original"], Overview = "Original", OfficialRating = "Original", Studios = ["Original"] };
-        var child = new Movie
+        var child = new Video
         {
             Genres = empty ? [] : ["Edited"],
             ProductionLocations = empty ? [] : ["Edited"],
@@ -77,8 +77,8 @@ public partial class BaseItemTests
     [Fact]
     public async Task OwnedItemInheritance_UsesLatestDestinationLocks()
     {
-        var child = new Movie { Id = Guid.NewGuid(), Genres = ["Old"] };
-        var current = new Movie { Id = child.Id, Genres = ["Edited"], LockedFields = [MetadataField.Genres] };
+        var child = new Video { Id = Guid.NewGuid(), Genres = ["Old"] };
+        var current = new Video { Id = child.Id, Genres = ["Edited"], LockedFields = [MetadataField.Genres] };
         var library = new Mock<ILibraryManager>();
         library.Setup(l => l.GetItemById(child.Id)).Returns(current);
         library.Setup(l => l.GetLibraryOptions(It.IsAny<BaseItem>())).Returns(new LibraryOptions());

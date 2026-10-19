@@ -19,6 +19,7 @@ using MediaBrowser.Controller.Dto;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaEncoding;
+using MediaBrowser.Controller.Providers;
 using MediaBrowser.Controller.Streaming;
 using MediaBrowser.Model.Dlna;
 using MediaBrowser.Model.Dto;
@@ -38,6 +39,8 @@ namespace Jellyfin.Api.Controllers;
 [Tags("Video")]
 public class VideosController : BaseJellyfinApiController
 {
+    private static readonly SemaphoreSlim VersionMutationLock = new(1, 1);
+
     private readonly ILibraryManager _libraryManager;
     private readonly IUserManager _userManager;
     private readonly IDtoService _dtoService;
@@ -142,35 +145,46 @@ public class VideosController : BaseJellyfinApiController
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult> DeleteAlternateSources([FromRoute, Required] Guid itemId)
     {
-        var item = _libraryManager.GetItemById<Video>(itemId, User.GetUserId());
-        if (item is null)
+        await VersionMutationLock.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
         {
-            return NotFound();
-        }
+            var item = _libraryManager.GetItemById<Video>(itemId, User.GetUserId());
+            var visited = new HashSet<Guid> { itemId };
+            while (item?.PrimaryVersionId is Guid primaryId)
+            {
+                if (!visited.Add(primaryId))
+                {
+                    return NotFound();
+                }
 
-        if (item.LinkedAlternateVersions.Length == 0 && item.PrimaryVersionId.HasValue)
+                item = _libraryManager.GetItemById<Video>(primaryId);
+            }
+
+            if (item is null)
+            {
+                return NotFound();
+            }
+
+            var memberIds = _libraryManager.GetLinkedAlternateVersions(item)
+                .Select(i => i.Id).Append(item.Id).Distinct().ToArray();
+            foreach (var id in memberIds)
+            {
+                using var itemLock = await MetadataUpdateLock.AcquireAsync(id, CancellationToken.None).ConfigureAwait(false);
+                // Refreshes may have replaced the cached object while this request waited.
+                if (_libraryManager.GetItemById(id) is Video current)
+                {
+                    current.SetPrimaryVersionId(null);
+                    current.LinkedAlternateVersions = [];
+                    await current.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, CancellationToken.None).ConfigureAwait(false);
+                }
+            }
+
+            return NoContent();
+        }
+        finally
         {
-            item = _libraryManager.GetItemById<Video>(item.PrimaryVersionId.Value);
+            VersionMutationLock.Release();
         }
-
-        if (item is null)
-        {
-            return NotFound();
-        }
-
-        foreach (var link in _libraryManager.GetLinkedAlternateVersions(item))
-        {
-            link.SetPrimaryVersionId(null);
-            link.LinkedAlternateVersions = Array.Empty<LinkedChild>();
-
-            await link.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, CancellationToken.None).ConfigureAwait(false);
-        }
-
-        item.LinkedAlternateVersions = Array.Empty<LinkedChild>();
-        item.SetPrimaryVersionId(null);
-        await item.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, CancellationToken.None).ConfigureAwait(false);
-
-        return NoContent();
     }
 
     /// <summary>
@@ -186,73 +200,97 @@ public class VideosController : BaseJellyfinApiController
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult> MergeVersions([FromQuery, Required, ModelBinder(typeof(CommaDelimitedCollectionModelBinder))] Guid[] ids)
     {
-        var userId = User.GetUserId();
-        var items = ids
-            .Select(i => _libraryManager.GetItemById<BaseItem>(i, userId))
-            .OfType<Video>()
-            .OrderBy(i => i.Id)
-            .ToList();
-
-        if (items.Count < 2)
+        // Serialize group discovery and mutation across merge/split requests. Acquire only one
+        // item lock at a time: refreshes may already hold a parent lock while maintaining children.
+        await VersionMutationLock.WaitAsync(CancellationToken.None).ConfigureAwait(false);
+        try
         {
-            return BadRequest("Please supply at least two videos to merge.");
-        }
-
-        var primaryVersion = items.FirstOrDefault(i => i.MediaSourceCount > 1 && !i.PrimaryVersionId.HasValue);
-        if (primaryVersion is null)
-        {
-            primaryVersion = items
-                .OrderBy(i =>
-                {
-                    if (i.Video3DFormat.HasValue || i.VideoType != VideoType.VideoFile)
-                    {
-                        return 1;
-                    }
-
-                    return 0;
-                })
-                .ThenByDescending(i => i.GetDefaultVideoStream()?.Width ?? 0)
-                .First();
-        }
-
-        var alternateVersionsOfPrimary = primaryVersion.LinkedAlternateVersions.ToList();
-
-        foreach (var item in items.Where(i => !i.Id.Equals(primaryVersion.Id)))
-        {
-            item.SetPrimaryVersionId(primaryVersion.Id);
-
-            await item.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, CancellationToken.None).ConfigureAwait(false);
-
-            // Re-route any playlist/collection references from this item to the primary
-            await _libraryManager.RerouteLinkedChildReferencesAsync(item.Id, primaryVersion.Id).ConfigureAwait(false);
-
-            if (!alternateVersionsOfPrimary.Any(i => i.ItemId.HasValue && i.ItemId.Value.Equals(item.Id)))
+            var userId = User.GetUserId();
+            var selected = ids.Distinct()
+                .Select(i => _libraryManager.GetItemById<BaseItem>(i, userId))
+                .OfType<Video>().OrderBy(i => i.Id).ToList();
+            if (selected.Count < 2)
             {
-                alternateVersionsOfPrimary.Add(new LinkedChild
-                {
-                    ItemId = item.Id,
-                    Type = LinkedChildType.LinkedAlternateVersion
-                });
+                return BadRequest("Please supply at least two videos to merge.");
             }
 
-            foreach (var linkedItem in item.LinkedAlternateVersions)
+            // Expand existing manual groups, including when the caller selected a secondary.
+            // Every member must point directly at the resulting primary, not at an old primary.
+            var members = new Dictionary<Guid, Video>();
+            var pending = new Queue<Video>(selected);
+            var discovered = new HashSet<Guid>();
+            while (pending.TryDequeue(out var member))
             {
-                if (linkedItem.ItemId.HasValue && !alternateVersionsOfPrimary.Any(i => i.ItemId.HasValue && i.ItemId.Value.Equals(linkedItem.ItemId.Value)))
+                if (!discovered.Add(member.Id))
                 {
-                    alternateVersionsOfPrimary.Add(linkedItem);
+                    continue;
+                }
+
+                // File-based alternates remain owned by their filesystem group. Adding them
+                // as manual links as well would duplicate sources and make splitting ambiguous.
+                if (member.PrimaryVersionId is Guid ownerId
+                    && _libraryManager.GetItemById(ownerId) is Video owner
+                    && _libraryManager.GetLocalAlternateVersionIds(owner).Contains(member.Id))
+                {
+                    if (!members.ContainsKey(owner.Id))
+                    {
+                        pending.Enqueue(owner);
+                    }
+
+                    continue;
+                }
+
+                if (!members.TryAdd(member.Id, member))
+                {
+                    continue;
+                }
+
+                if (member.PrimaryVersionId is Guid primaryId && _libraryManager.GetItemById(primaryId) is Video primary)
+                {
+                    pending.Enqueue(primary);
+                }
+
+                foreach (var linked in _libraryManager.GetLinkedAlternateVersions(member))
+                {
+                    pending.Enqueue(linked);
                 }
             }
 
-            if (item.LinkedAlternateVersions.Length > 0)
+            var items = members.Values.OrderBy(i => i.Id).ToList();
+            var primaryVersion = items.FirstOrDefault(i => i.MediaSourceCount > 1 && !i.PrimaryVersionId.HasValue)
+                ?? items.OrderBy(i => i.Video3DFormat.HasValue || i.VideoType != VideoType.VideoFile ? 1 : 0)
+                    .ThenByDescending(i => i.GetDefaultVideoStream()?.Width ?? 0).First();
+            var alternateIds = items.Where(i => i.Id != primaryVersion.Id).Select(i => i.Id).ToArray();
+            foreach (var id in alternateIds)
             {
-                item.LinkedAlternateVersions = Array.Empty<LinkedChild>();
-                await item.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, CancellationToken.None).ConfigureAwait(false);
+                using var itemLock = await MetadataUpdateLock.AcquireAsync(id, CancellationToken.None).ConfigureAwait(false);
+                if (_libraryManager.GetItemById(id) is Video current)
+                {
+                    current.SetPrimaryVersionId(primaryVersion.Id);
+                    current.LinkedAlternateVersions = [];
+                    await current.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, CancellationToken.None).ConfigureAwait(false);
+                    await _libraryManager.RerouteLinkedChildReferencesAsync(id, primaryVersion.Id).ConfigureAwait(false);
+                }
             }
-        }
 
-        primaryVersion.LinkedAlternateVersions = alternateVersionsOfPrimary.ToArray();
-        await primaryVersion.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, CancellationToken.None).ConfigureAwait(false);
-        return NoContent();
+            using var primaryLock = await MetadataUpdateLock.AcquireAsync(primaryVersion.Id, CancellationToken.None).ConfigureAwait(false);
+            if (_libraryManager.GetItemById(primaryVersion.Id) is Video currentPrimary)
+            {
+                currentPrimary.SetPrimaryVersionId(null);
+                currentPrimary.LinkedAlternateVersions = alternateIds.Select(id => new LinkedChild
+                {
+                    ItemId = id,
+                    Type = LinkedChildType.LinkedAlternateVersion
+                }).ToArray();
+                await currentPrimary.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, CancellationToken.None).ConfigureAwait(false);
+            }
+
+            return NoContent();
+        }
+        finally
+        {
+            VersionMutationLock.Release();
+        }
     }
 
     /// <summary>

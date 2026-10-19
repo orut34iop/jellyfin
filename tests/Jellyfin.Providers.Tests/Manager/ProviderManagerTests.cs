@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net.Http;
 using System.Runtime.CompilerServices;
@@ -777,11 +778,54 @@ namespace Jellyfin.Providers.Tests.Manager
             return serverConfiguration;
         }
 
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task SaveMetadata_FileFailureIsLoggedAndDoesNotRevertProtectedValues(bool pathFailure)
+        {
+            var item = new Movie
+            {
+                Id = Guid.NewGuid(), Genres = ["中文剧情"], ProductionLocations = [],
+                LockedFields = [MetadataField.Genres, MetadataField.ProductionLocations],
+                DateLastSaved = DateTime.UnixEpoch
+            };
+            var saver = new Mock<IMetadataFileSaver>();
+            saver.SetupGet(s => s.Name).Returns("Nfo");
+            saver.Setup(s => s.IsEnabledFor(item, ItemUpdateType.MetadataEdit)).Returns(true);
+            if (pathFailure)
+            {
+                saver.Setup(s => s.GetSavePath(item)).Throws(new UnauthorizedAccessException("denied"));
+            }
+            else
+            {
+                saver.Setup(s => s.GetSavePath(item)).Returns("/fixture/movie.nfo");
+                saver.Setup(s => s.SaveAsync(item, It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("disk full"));
+            }
+
+            var monitor = new Mock<ILibraryMonitor>();
+            var logger = new Mock<ILogger<ProviderManager>>();
+            using var manager = GetProviderManager(
+                libraryOptions: new LibraryOptions { MetadataSavers = ["Nfo"] },
+                libraryMonitor: monitor.Object,
+                logger: logger.Object);
+            AddParts(manager, metadataSavers: [saver.Object]);
+            await manager.SaveMetadataAsync(item, ItemUpdateType.MetadataEdit);
+            Assert.Equal(["中文剧情"], item.Genres);
+            Assert.Empty(item.ProductionLocations);
+            Assert.Equal([MetadataField.Genres, MetadataField.ProductionLocations], item.LockedFields);
+            Assert.Equal(DateTime.UnixEpoch, item.DateLastSaved);
+            monitor.Verify(m => m.ReportFileSystemChangeBeginning("/fixture/movie.nfo"), pathFailure ? Times.Never() : Times.Once());
+            monitor.Verify(m => m.ReportFileSystemChangeComplete("/fixture/movie.nfo", false), pathFailure ? Times.Never() : Times.Once());
+            logger.Verify(l => l.Log(LogLevel.Error, It.IsAny<EventId>(), It.IsAny<It.IsAnyType>(), It.IsAny<Exception>(), It.IsAny<Func<It.IsAnyType, Exception?, string>>()), Times.Once);
+        }
+
         private static ProviderManager GetProviderManager(
             ServerConfiguration? serverConfiguration = null,
             LibraryOptions? libraryOptions = null,
             IBaseItemManager? baseItemManager = null,
-            ILibraryManager? libraryManager = null)
+            ILibraryManager? libraryManager = null,
+            ILibraryMonitor? libraryMonitor = null,
+            ILogger<ProviderManager>? logger = null)
         {
             var serverConfigurationManager = new Mock<IServerConfigurationManager>(MockBehavior.Strict);
             serverConfigurationManager.Setup(i => i.Configuration)
@@ -801,8 +845,8 @@ namespace Jellyfin.Providers.Tests.Manager
                 Mock.Of<IHttpClientFactory>(),
                 Mock.Of<ISubtitleManager>(),
                 serverConfigurationManager.Object,
-                Mock.Of<ILibraryMonitor>(),
-                _logger,
+                libraryMonitor ?? Mock.Of<ILibraryMonitor>(),
+                logger ?? _logger,
                 Mock.Of<IFileSystem>(),
                 Mock.Of<IServerApplicationPaths>(),
                 libraryManager,

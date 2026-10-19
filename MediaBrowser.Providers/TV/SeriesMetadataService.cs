@@ -56,13 +56,19 @@ public class SeriesMetadataService : MetadataService<Series, SeriesInfo>
     /// <inheritdoc />
     public override async Task<ItemUpdateType> RefreshMetadata(BaseItem item, MetadataRefreshOptions refreshOptions, CancellationToken cancellationToken)
     {
-        if (item is Series series)
+        if (item is Series series && !refreshOptions.RefreshMediaInfoOnly && refreshOptions.MetadataRefreshMode != MetadataRefreshMode.None)
         {
             var seasons = series.GetRecursiveChildren(i => i is Season).ToList();
 
-            foreach (var season in seasons)
+            foreach (var snapshot in seasons)
             {
-                var hasUpdate = refreshOptions is not null && season.BeforeMetadataRefresh(refreshOptions.ReplaceAllMetadata);
+                using var childLock = await MetadataUpdateLock.AcquireAsync(snapshot.Id, cancellationToken).ConfigureAwait(false);
+                if (LibraryManager.GetItemById(snapshot.Id) is not Season season)
+                {
+                    continue;
+                }
+
+                var hasUpdate = season.BeforeMetadataRefresh(refreshOptions.ReplaceAllMetadata);
                 if (hasUpdate)
                 {
                     await season.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, cancellationToken).ConfigureAwait(false);
@@ -112,8 +118,15 @@ public class SeriesMetadataService : MetadataService<Series, SeriesInfo>
         var children = series.GetRecursiveChildren(i => i is Season || i is Episode);
         var seasons = children.OfType<Season>().ToList();
 
-        foreach (var child in children)
+        foreach (var snapshot in children)
         {
+            using var childLock = await MetadataUpdateLock.AcquireAsync(snapshot.Id, cancellationToken).ConfigureAwait(false);
+            var child = LibraryManager.GetItemById(snapshot.Id);
+            if (child is not Season && child is not Episode)
+            {
+                continue;
+            }
+
             var updateType = ItemUpdateType.None;
 
             if (child is IHasSeries hasSeries

@@ -154,7 +154,7 @@ namespace MediaBrowser.Controller.Entities
         {
             get
             {
-                return GetMediaSourceCount();
+                return GetAllItemsForMediaSources().Count();
             }
         }
 
@@ -251,33 +251,6 @@ namespace MediaBrowser.Controller.Entities
         /// <value>The type of the media.</value>
         [JsonIgnore]
         public override MediaType MediaType => MediaType.Video;
-
-        private int GetMediaSourceCount(HashSet<Guid> callstack = null)
-        {
-            callstack ??= [];
-            if (PrimaryVersionId.HasValue)
-            {
-                var item = LibraryManager.GetItemById(PrimaryVersionId.Value);
-                if (item is Video video)
-                {
-                    if (callstack.Contains(video.Id))
-                    {
-                        // Count alternate versions using LibraryManager
-                        var linkedCount = LibraryManager.GetLinkedAlternateVersions(video).Count();
-                        var localCount = LibraryManager.GetLocalAlternateVersionIds(video).Count();
-                        return linkedCount + localCount + 1;
-                    }
-
-                    callstack.Add(video.Id);
-                    return video.GetMediaSourceCount(callstack);
-                }
-            }
-
-            // Count alternate versions using LibraryManager
-            var linkedVersionCount = LibraryManager.GetLinkedAlternateVersions(this).Count();
-            var localVersionCount = LibraryManager.GetLocalAlternateVersionIds(this).Count();
-            return linkedVersionCount + localVersionCount + 1;
-        }
 
         /// <inheritdoc />
         public override string GetInheritedOriginalLanguage()
@@ -594,10 +567,13 @@ namespace MediaBrowser.Controller.Entities
             // A version is resolved on its own, so it does not learn whether the folder it sits in
             // holds other items. It has to share that with the version it belongs to, before the
             // refresh below acts on it.
-            if (LibraryManager.GetItemById(id) is Video resolvedVersion && resolvedVersion.IsInMixedFolder != IsInMixedFolder)
+            using (await MetadataUpdateLock.AcquireAsync(id, cancellationToken).ConfigureAwait(false))
             {
-                resolvedVersion.IsInMixedFolder = IsInMixedFolder;
-                await resolvedVersion.UpdateToRepositoryAsync(ItemUpdateType.MetadataImport, cancellationToken).ConfigureAwait(false);
+                if (LibraryManager.GetItemById(id) is Video resolvedVersion && resolvedVersion.IsInMixedFolder != IsInMixedFolder)
+                {
+                    resolvedVersion.IsInMixedFolder = IsInMixedFolder;
+                    await resolvedVersion.UpdateToRepositoryAsync(ItemUpdateType.MetadataImport, cancellationToken).ConfigureAwait(false);
+                }
             }
 
             await RefreshMetadataForOwnedVideo(options, copyTitleMetadata, path, cancellationToken).ConfigureAwait(false);
@@ -605,6 +581,7 @@ namespace MediaBrowser.Controller.Entities
             // Create LinkedChild entry for this local alternate version
             // This ensures the relationship exists in the database even if the alternate version
             // was created after the primary video was first saved
+            using var versionLock = await MetadataUpdateLock.AcquireAsync(id, cancellationToken).ConfigureAwait(false);
             if (LibraryManager.GetItemById(id) is Video video)
             {
                 LibraryManager.UpsertLinkedChild(Id, video.Id, LinkedChildType.LocalAlternateVersion);
@@ -805,9 +782,14 @@ namespace MediaBrowser.Controller.Entities
 
         protected override IEnumerable<(BaseItem Item, MediaSourceType MediaSourceType)> GetAllItemsForMediaSources()
         {
-            var primary = PrimaryVersionId.HasValue
-                ? LibraryManager.GetItemById(PrimaryVersionId.Value) as Video
-                : null;
+            Video primary = null;
+            var visited = new HashSet<Guid> { Id };
+            var parentId = PrimaryVersionId;
+            while (parentId is Guid id && visited.Add(id) && LibraryManager.GetItemById(id) is Video parent)
+            {
+                primary = parent;
+                parentId = parent.PrimaryVersionId;
+            }
 
             var primaryLinked = primary is null
                 ? []
