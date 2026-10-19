@@ -2,7 +2,7 @@
 
 Verified on 2026-10-19. Official `master`: `08c2ba6e0b6499122822f1c5b18bc426104538b4`, reconfirmed against the remote in this review. Local implementation and validation baseline: `4416c74b72`.
 
-Status: issue analysis, evidence and submission order, not a published PR body. The core fix has not been ported to an isolated upstream branch or reviewed by maintainers. This update changes documentation and priorities only, without changing code or the real library. [中文](playback-metadata-refresh-upstream-plan.zh-CN.md) · [Full design](metadata-refresh-consistency-design.md)
+Status: the isolated core fix is implemented and pushed on `codex/upstream-playback-metadata`, commit `3535edb442`. Official-baseline failure and patched success have been demonstrated. Awaiting user review; no upstream PR has been created. See the [isolated patch and validation reference](https://github.com/orut34iop/jellyfin/blob/3535edb442a38a9b1dfe5bfdfd5a6a14aa9b3b70/docs/playback-metadata-refresh.md). [中文](playback-metadata-refresh-upstream-plan.zh-CN.md) · [Full design](metadata-refresh-consistency-design.md)
 
 ## 1. Actual workflow and symptom
 
@@ -62,42 +62,31 @@ To minimize behavioral changes, the first upstream PR can preserve official deci
 
 Keep existing clients and editing API compatible. Do not add revision tokens, conditional requests or stale-DTO conflict detection. Do not redefine ordinary user-requested refresh/replace-all behavior. Exclude Moonfin-specific paths, custom fast-import configuration and the translation tool from the official patch.
 
-## 4. Existing evidence and outstanding evidence
+## 4. Completed isolated validation
 
-| Check | Local evidence | Boundary |
-| --- | --- | --- |
-| Technical refresh does not invoke NFO/remote descriptive providers | `MetadataServiceRefreshTests.RefreshMetadata_MediaInfoOnly_PreservesEditedMetadata`, including edited/empty fields, first refresh and whole-item locking | Mocked provider tests, not a runtime reproduction on unmodified official code. |
-| Embedded tags cannot populate titles, genres or dates | `FFProbeVideoInfoTests.FetchEmbeddedInfo_PlaybackProbe_PreservesEditedAndEmptyFields` | Direct technical-scope field assertions. |
-| Repeated reads with primary streams avoid refresh | `MediaSourceManagerTests.GetPlaybackMediaSources_PersistedStreams_DoesNotRefresh`, ordinary paths and STRM | Belongs to the subsequent reuse/probing optimization. |
-| Missing primary streams still get probed; source identity is respected | `GetPlaybackMediaSources_MissingVideoStream_ProbesReturnedMediaSource` and `GetPlaybackMediaSources_ReorderedVersions_RefreshesMissingVersionOnly` | Detailed source selection follows separately; the core must preserve relationships. |
-| Technical persistence preserves committed descriptions/relationships despite stale input | `ItemPersistenceMediaInfoTests.SaveMediaInfo_StaleDescription_DoesNotOverwriteMetadataOrRelationships` | Independent SQLite test database. |
-| Technical scope avoids owned-item maintenance; failed/canceled work restores staged technical state | `MetadataRefreshBoundaryTests` and failure/cancellation cases in `MetadataServiceRefreshTests` | Current local implementation. |
-| Real HTTP workflow | The full design records generated-video STRM/fast-symlink import, first/repeated PlaybackInfo after unlocked API edits, cold restart and source changes; the later script covers TV, multipart and version groups | Playback preparation over HTTP, not GUI player end-to-end testing. The latest eight-group script mainly uses protected values and does not replace the earlier unlocked-value case. |
+Official base `08c2ba6e0b` and the isolated core patch use the same generated-video fixture served over loopback HTTP to STRM, with no fast-import dependency. NFO saving and automatic scanning are disabled; the old NFO remains on disk after API editing. Successful API readback precedes two PlaybackInfo requests.
 
-Latest local affected-project validation: **1,934 passed, 13 existing platform skips**. This is a five-project total including other work, not 1,934 newly added core-fix tests. The latest isolated HTTP acceptance script passed eight groups. No real-library editing or refresh was performed.
+- `lockdata=true`: official code restores NFO genres/title/overview and mixes old locations into the collection; the patch retains API edits and lock state.
+- `lockdata=false`: official code appends old source locations; the patch retains the curated values.
+- Explicit API-cleared fields: official code refills them; the patch retains empty values.
+- Both builds return usable 160×90 primary video streams. The normal preservation assertion exits 1 against the baseline and 0 against the patch.
+- The patch also passes source-HTTP-404 retention of existing technical/descriptive data and explicit replace-all still reading NFO.
 
-**Outstanding: run the same minimal reproduction on unmodified official `master` and on an official branch containing only the core patch, demonstrating failure before and success after.** Local passing results must not be described as an already completed official-baseline reproduction or isolated-patch validation.
+The isolated branch passes **2,031 tests with 13 existing platform skips**, including 24 new regression cases. Release builds pass; the Debug analyzer build passes with a temporary Roslyn 5.9 compiler matching the official analyzer. Ordinary missing-primary-stream, audio and alternate-description boundaries have component tests; the real HTTP cases cover movies, not GUI player end-to-end validation.
 
-Before submission:
-
-1. Use an isolated server, a generated short video, STRM and NFO. Disable NFO saving, automatic scans and unrelated providers so the NFO remains unchanged after API edits.
-2. Put distinctive old genres and locations in NFO. Use `lockdata=true` with the corresponding destination fields unlocked as a controlled case for the identified replacement branch. Also test `lockdata=false`, distinguishing replacement from append behavior rather than assuming identical results.
-3. Edit via the existing full DTO API, reread to confirm committed curated values, and record item/field lock states.
-4. Request PlaybackInfo, verify usable primary streams, and reread metadata/logs. The unmodified baseline must demonstrate changed committed values, not merely a refresh log entry.
-5. Apply the core patch on that same official base and repeat: technical information works, API-edited descriptions remain, and the descriptive NFO provider is not invoked.
-6. Clearly document how an ordinary-file missing-stream fixture is produced. Add protected-empty-value, failure/cancellation and explicit ordinary-refresh checks. Do not claim ordinary official imports naturally omit probing.
+[English implementation reference](https://github.com/orut34iop/jellyfin/blob/3535edb442a38a9b1dfe5bfdfd5a6a14aa9b3b70/docs/playback-metadata-refresh.md), [Chinese reference](https://github.com/orut34iop/jellyfin/blob/3535edb442a38a9b1dfe5bfdfd5a6a14aa9b3b70/docs/playback-metadata-refresh.zh-CN.md), [before observations](https://github.com/orut34iop/jellyfin/blob/3535edb442a38a9b1dfe5bfdfd5a6a14aa9b3b70/docs/evidence/playback-before.json), [after observations](https://github.com/orut34iop/jellyfin/blob/3535edb442a38a9b1dfe5bfdfd5a6a14aa9b3b70/docs/evidence/playback-after.json). Only private test servers were run; the existing installation and real library were not operated on. Cross-technical-table crash transactions, refresh concurrency coordination and stale DTO conflicts are outside this isolated patch.
 
 ## 5. Upstream split and order
 
 | Order | Independent scope | Status / dependency |
 | --- | --- | --- |
-| **PR 1: core issue** | Separate playback technical discovery from descriptive refresh, including scope propagation, embedded-tag isolation, necessary technical persistence boundaries and regression tests | Highest priority. Create a clean branch from official `master` and establish the before/after evidence. Do not cherry-pick the entire customized local change. |
+| **PR 1: core issue** | Separate playback technical discovery from descriptive refresh, including scope propagation, embedded-tag isolation, necessary technical persistence boundaries and regression tests | Independently implemented from official `master` as `3535edb442`; before/after evidence and tests pass, pushed to the fork pending user review before PR creation. The complete fork customization was not ported. |
 | PR 2: on-demand probing | Reuse persisted primary streams, change repeated STRM probing, operate per source, verify source changes and explicit revalidation | Implemented locally, not independently ported/validated. Review after PR 1 to separate freshness-policy changes from the core bug. |
 | PR 3: missing-data collections | Do not append source locations/studios/tags to populated fields in missing-data mode | `codex/upstream-preserve-metadata-collections`, `7efec6e9d2`; 516 Providers tests passed. Deferred; not a substitute for PR 1. |
 | PR 4: NFO file saving | Replace the old NFO only after a temporary replacement is complete | `codex/upstream-nfo-atomic-save`, `d65043f4b0`; 43 XbmcMetadata tests passed. Deferred and independent of the playback entry. |
 | Follow-up: refresh coordination/inheritance | Ordinary refresh, owned items, seasons/episodes and merge/split coordination | Split further by independently established official bugs; exclude behaviors unique to the fork. |
 | Separate designs: advanced consistency | Cross-technical-table crash transactions; explicit protected-field reset API | Distinct review scopes requiring design discussion. Neither needs to land before the playback bug fix. |
 
-Within PR 1, use three coherent commits for review: (1) focused regression fixtures; (2) refresh scope/provider restrictions; (3) persistence boundary plus failure/compatibility tests. The complete PR must pass; an entry flag without embedded-tag and persistence protection is insufficient.
+PR 1 is delivered as one complete commit containing the implementation, regression cases and bilingual evidence for joint testing/review. It includes scope propagation, embedded-tag isolation, persistence and alternate-description copy protection, rather than an entry flag alone.
 
 All PRs target official `jellyfin/jellyfin:master`. Reprioritizing does not delete the two prepared branches, and they should not be published first. Official contribution policy still requires submitter review and the submitter's own explanation; this is engineering reference material, not an AI-generated PR body to post verbatim.

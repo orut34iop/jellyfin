@@ -2,7 +2,7 @@
 
 核对日期：2026-10-19。官方 `master`：`08c2ba6e0b6499122822f1c5b18bc426104538b4`（本次再次通过远端查询核实）。本地实现和验证基线：`4416c74b72`。
 
-状态：本文件整理问题、证据和提交顺序，不是已发布的 PR 正文。核心修复尚未移植到独立上游分支，也尚未取得维护者评审。本次只调整文档和优先级，不修改代码或真实媒体库。[English](playback-metadata-refresh-upstream-plan.md) · [完整设计](metadata-refresh-consistency-design.zh-CN.md)
+状态：核心修复已在独立分支 `codex/upstream-playback-metadata` 完成并推送，提交 `3535edb442`；已取得官方基线与核心补丁的实际失败／通过对照。等待用户审核，尚未创建上游 PR。参见[独立补丁与验证说明](https://github.com/orut34iop/jellyfin/blob/3535edb442a38a9b1dfe5bfdfd5a6a14aa9b3b70/docs/playback-metadata-refresh.zh-CN.md)。[English](playback-metadata-refresh-upstream-plan.md) · [完整设计](metadata-refresh-consistency-design.zh-CN.md)
 
 ## 1. 实际背景和现象
 
@@ -62,42 +62,31 @@ RefreshMetadata(EnableRemoteContentProbe = true, FullRefresh)
 
 保持旧客户端及现有编辑 API 兼容，不添加版本号、条件请求或旧 DTO 冲突检测。不改变用户主动发起普通刷新、替换全部元数据的语义。不把 Moonfin 专用逻辑、极速导入配置或翻译工具带入官方补丁。
 
-## 4. 已有测试证据及尚待补齐的证据
+## 4. 已完成的独立验证
 
-| 验证点 | 本地证据 | 边界 |
-| --- | --- | --- |
-| 技术刷新不调用 NFO／远程描述提供者 | `MetadataServiceRefreshTests.RefreshMetadata_MediaInfoOnly_PreservesEditedMetadata`，含已编辑值、空值、首次刷新及整项锁场景 | 提供者替身测试，不是未修改官方版本的实际复现。 |
-| 内嵌标签不回填标题、流派和日期 | `FFProbeVideoInfoTests.FetchEmbeddedInfo_PlaybackProbe_PreservesEditedAndEmptyFields` | 直接验证技术范围中的字段保护。 |
-| 已有主流时重复读取不刷新 | `MediaSourceManagerTests.GetPlaybackMediaSources_PersistedStreams_DoesNotRefresh`，普通路径及 STRM | 属于后续缓存／按需探测改动。 |
-| 缺少主流仍能探测，并定位相应版本 | `GetPlaybackMediaSources_MissingVideoStream_ProbesReturnedMediaSource`、`GetPlaybackMediaSources_ReorderedVersions_RefreshesMissingVersionOnly` | 更细的版本选择属于后续按源优化；核心不得破坏关系。 |
-| 技术保存不覆盖旧快照之外的当前描述和关系 | `ItemPersistenceMediaInfoTests.SaveMediaInfo_StaleDescription_DoesNotOverwriteMetadataOrRelationships` | 使用独立 SQLite 测试数据库。 |
-| 技术范围不扩展成附属条目维护；失败／取消不残留准备中的技术状态 | `MetadataRefreshBoundaryTests`、`MetadataServiceRefreshTests` 的失败／取消测试 | 当前本地实现验证。 |
-| 实际 HTTP 工作流 | 完整设计记录了生成影片的普通 STRM／极速符号链接导入、未锁定 API 编辑后的首次／重复 PlaybackInfo、冷启动及源变化验证；后续脚本覆盖剧集、季、单集、分段和版本组 | HTTP 播放准备验证，不是 GUI 播放器端到端验收。最新八组脚本主要使用受保护值，不能替代未锁定值的原始用例。 |
+官方基线 `08c2ba6e0b` 和核心补丁使用同一隔离夹具，生成小视频，通过回环 HTTP 提供给 STRM；不依赖极速导入。关闭 NFO 保存和自动扫描，在 API 编辑后保持磁盘 NFO 为旧值，确认数据库回读成功后请求两次 PlaybackInfo。
 
-最近完整本地相关测试：**1,934 项通过、13 项既有平台测试跳过**。这是五个相关项目的合计，包含其他改动，不是核心修复新增了 1,934 项测试。最新隔离 HTTP 验收脚本通过八组检查。真实媒体库没有执行修改或刷新。
+- `lockdata=true`：官方版本把流派、标题和简介恢复为 NFO 值，地区混入旧值；补丁保持 API 修改值和锁状态。
+- `lockdata=false`：官方版本向地区追加旧来源值；补丁保持 API 修改值。
+- API 主动清空的字段：官方版本重新填充，补丁保留空值。
+- 两个版本均返回可用的 160×90 主视频流。普通保护断言在基线上以退出码 1 失败，在补丁上以退出码 0 通过。
+- 补丁还通过源 HTTP 404 后保留已有技术数据／描述，以及主动替换全部元数据仍读取 NFO 的验证。
 
-**尚未完成：在未修改的官方 `master` 与只包含核心补丁的官方分支上，用同一最小用例做失败／通过对照。** 目前不能把本地通过结果写成“官方基线已经实际复现且独立补丁已通过”。
+本次独立分支共 **2,031 项通过、13 项既有平台测试跳过**，其中新增 24 个回归用例；Release 构建通过，Debug 分析检查使用与官方分析器匹配的临时 Roslyn 5.9 编译器通过。普通文件缺少主流、音频和副版本描述边界由组件测试覆盖；实际 HTTP 用例覆盖电影，不声称是 GUI 播放器端到端验收。
 
-正式提交前补齐：
-
-1. 独立服务器、生成的小视频、STRM 及 NFO；关闭 NFO 保存、自动扫描和无关提供者，保证 API 修改后磁盘仍保留原始 NFO。
-2. NFO 提供可识别的旧流派和地区。设置 `lockdata=true`、数据库对应字段未锁定，作为针对已识别替换分支的可控用例；另测 `lockdata=false`，区分替换与追加，不声称两者表现相同。
-3. 用当前编辑 API 的完整 DTO 改为不同的中文值，并回读确认已经保存；记录整项锁与字段锁。
-4. 请求 PlaybackInfo，确认仍能取得有效主流；回读元数据和服务日志。未修改官方基线必须显示实际已保存值发生变化，而不只是看到了刷新日志。
-5. 在同一官方基线上应用核心补丁，再跑相同用例：技术信息可用、描述值保持 API 修改结果、NFO 描述提供者没有执行。
-6. 为普通文件缺少主流的情形建立明确说明的测试夹具；补充受保护空值、错误／取消及普通主动刷新行为。不能声称官方普通导入天然不探测视频。
+[英文实现说明](https://github.com/orut34iop/jellyfin/blob/3535edb442a38a9b1dfe5bfdfd5a6a14aa9b3b70/docs/playback-metadata-refresh.md)、[中文实现说明](https://github.com/orut34iop/jellyfin/blob/3535edb442a38a9b1dfe5bfdfd5a6a14aa9b3b70/docs/playback-metadata-refresh.zh-CN.md)、[修改前记录](https://github.com/orut34iop/jellyfin/blob/3535edb442a38a9b1dfe5bfdfd5a6a14aa9b3b70/docs/evidence/playback-before.json)、[修改后记录](https://github.com/orut34iop/jellyfin/blob/3535edb442a38a9b1dfe5bfdfd5a6a14aa9b3b70/docs/evidence/playback-after.json)。本次只运行私有测试服务器，没有安装替换已运行服务或操作真实媒体库。跨技术表崩溃事务、刷新并发协调和旧 DTO 冲突不属于该独立补丁。
 
 ## 5. 上游拆分及提交顺序
 
 | 顺序 | 独立范围 | 当前状态／依赖 |
 | --- | --- | --- |
-| **PR 1：核心问题** | 播放技术探测与描述刷新分离；包括范围传递、内嵌标签隔离、必要技术保存边界及对应回归测试 | 最高优先级；从官方 `master` 建立干净分支，先补上述前后对照。不能直接 cherry-pick 包含整套定制的本地提交。 |
+| **PR 1：核心问题** | 播放技术探测与描述刷新分离；包括范围传递、内嵌标签隔离、必要技术保存边界及对应回归测试 | 已从官方 `master` 独立实现，`3535edb442`；前后对照和测试通过，已推送 fork，等待用户审核后创建 PR。未带入整套本地定制。 |
 | PR 2：按需探测 | 复用已有主流；调整 STRM 重复探测；按具体媒体源处理，并验证源变化和明确重新验证 | 本地已实现，尚未独立移植验证。应在 PR 1 后评审，避免改变缓存新鲜度规则掩盖核心问题。 |
 | PR 3：补缺集合 | 补缺时不向已有地区／工作室／标签追加来源值 | `codex/upstream-preserve-metadata-collections`，`7efec6e9d2`，516 项 Providers 测试通过；暂缓，不能作为 PR 1 的替代。 |
 | PR 4：NFO 文件保存 | 临时文件完成后替换原 NFO，保留失败前的内容 | `codex/upstream-nfo-atomic-save`，`d65043f4b0`，43 项 XbmcMetadata 测试通过；暂缓，与播放入口修复独立。 |
 | 后续：刷新协调与继承 | 普通刷新、附属条目、季／集及合并／拆分协调 | 按官方实际存在的问题继续细分；本地定制独有的行为不移植。 |
 | 另行设计：高级一致性 | 跨技术表崩溃事务；显式受保护字段重置 API | 两个不同评审范围；先作设计讨论，不要求它们先合并才能修复播放问题。 |
 
-PR 1 内部可以用三条连贯提交帮助评审：①核心回归用例；②技术刷新范围与提供者约束；③技术保存边界及失败／兼容性测试。整个 PR 必须完整通过测试，不能仅提交入口开关而遗漏内嵌标签或保存路径。
+PR 1 实际以一条完整提交交付核心实现、回归用例和双语证据，便于整体测试与审核；包含技术范围、内嵌标签、保存路径和副版本描述复制保护。未只提交入口开关。
 
 所有正式 PR 的目标都是官方 `jellyfin/jellyfin:master`。优先级调整不删除已准备的两个分支，也不向上游先发布它们。按官方贡献政策，发布前仍需提交者审核和自己的说明；本文是工程参考资料，不应直接作为 AI 生成的 PR 正文发布。

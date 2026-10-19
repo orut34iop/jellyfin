@@ -8,6 +8,8 @@ This English edition is self-contained and intended for a future upstream submis
 
 Upstream priority update (2026-10-19): submit the playback-triggered descriptive refresh fix first. The two prepared collection/NFO-saving candidates are deferred. See the [focused core issue, evidence and submission plan](playback-metadata-refresh-upstream-plan.md).
 
+Isolated core delivery: `codex/upstream-playback-metadata` / `3535edb442`. Official-baseline overwrite and patched preservation are reproduced; 2,031 tests pass with 13 platform skips. See the [isolated implementation and evidence](https://github.com/orut34iop/jellyfin/blob/3535edb442a38a9b1dfe5bfdfd5a6a14aa9b3b70/docs/playback-metadata-refresh.md). Pushed only to the fork pending user review before upstream PR creation. This patch excludes the cross-technical-table transactions and reset API described later in this broader design.
+
 ## Goals and scope
 
 Media information reads should use committed database values that remain valid for the current media source. Retrieval should occur only when information required by the current operation is unknown or invalid. Technical discovery, library scanning, and descriptive metadata import need explicit boundaries so that playback, subtitle maintenance, and background refreshes cannot unexpectedly overwrite curated fields.
@@ -33,7 +35,7 @@ These findings establish overwrite paths, but do not replace reproduction of the
 
 ### Reproduction protocol for implementation
 
-This protocol is a proposed validation procedure, not a claim that a runtime reproduction has already been completed on the inspected upstream commit.
+This is the full-design validation protocol. On 2026-10-19 the official STRM runtime overwrite and isolated core-patch comparison were completed, as linked above; the broader cold-start/concurrency/other-media matrix must not automatically be treated as fully validated for that isolated patch.
 
 1. Record the server commit/version, client, enabled metadata providers and savers, library settings, and lock state. Use an isolated library with a small lawful test video and matching NFO containing distinctive original genre and country values. Disable unrelated scheduled work during the isolated playback test, then test those workflows separately.
 2. Test an ordinary file and a STRM item separately. The inspected upstream STRM branch provides a refresh trigger without requiring the fork's import mode. For a missing-stream case, use a controlled fixture or supported import workflow and document how the missing state was produced; do not claim a standard file import naturally omits probing.
@@ -360,16 +362,17 @@ Tests inject a failed insert after deletes and check all old rows and scalar val
 
 ### Upstream delivery status
 
-Two focused candidates are based on official `master` at `08c2ba6e0b6499122822f1c5b18bc426104538b4` and pushed to the contributor fork:
+The core candidate and two deferred focused candidates are based on official `master` at `08c2ba6e0b6499122822f1c5b18bc426104538b4` and pushed to the contributor fork:
 
 | Candidate | Commit / branch | Validation |
 | --- | --- | --- |
+| Playback discovery isolation (first priority) | [`3535edb442`](https://github.com/orut34iop/jellyfin/commit/3535edb442a38a9b1dfe5bfdfd5a6a14aa9b3b70), `codex/upstream-playback-metadata` | Official before/after comparison passed; 2,031 tests passed, 13 platform skips. |
 | Preserve the old NFO if saving fails | [`d65043f4b0`](https://github.com/orut34iop/jellyfin/commit/d65043f4b0), `codex/upstream-nfo-atomic-save` | 43 XbmcMetadata tests passed. |
 | Do not append old source collections when fetching missing metadata | [`7efec6e9d2`](https://github.com/orut34iop/jellyfin/commit/7efec6e9d2), `codex/upstream-preserve-metadata-collections` | 516 Providers tests passed. |
 
-Neither candidate is an upstream PR yet or has maintainer approval. Jellyfin's [LLM contribution policy](https://jellyfin.org/docs/general/contributing/llm-policies/) requires human review, understanding and the submitter's own explanation in PR bodies; an explicitly disclosed translation of human-written text is allowed. The submitter's review and text have been requested before posting. The generated design documents are working/reference materials, not text to paste as a PR body or issue.
+None of these candidates is an upstream PR yet or has maintainer approval. Jellyfin's [LLM contribution policy](https://jellyfin.org/docs/general/contributing/llm-policies/) requires human review, understanding and the submitter's own explanation in PR bodies; an explicitly disclosed translation of human-written text is allowed. As requested, delivery is to the fork first; upstream PR creation awaits user review. The generated design documents are working/reference materials, not text to paste as a PR body or issue.
 
-Playback scope/field protection, technical transaction support, group coordination, and the new reset API must remain separate review scopes. The latter API and transaction refactor need design discussion under the upstream contribution workflow before claiming upstream acceptance. The remaining broader changes have not yet been ported into independently validated upstream branches. Local deployment or tests do not close these upstream tasks.
+Playback scope/field protection, technical transaction support, group coordination, and the new reset API must remain separate review scopes. The latter API and transaction refactor need design discussion under the upstream contribution workflow before claiming upstream acceptance. The playback core scope has been delivered independently; the remaining broader changes have not yet been ported into independently validated upstream branches. Local deployment or tests do not close these upstream tasks.
 
 ### Advanced consistency validation
 
