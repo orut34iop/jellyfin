@@ -535,16 +535,8 @@ namespace MediaBrowser.Controller.Entities
                 hasChanges = await base.RefreshedOwnedItems(options, fileSystemChildren, cancellationToken).ConfigureAwait(false);
             }
 
-            // Clean up LocalAlternateVersions - remove paths that no longer exist
-            if (LocalAlternateVersions.Length > 0)
-            {
-                var validPaths = LocalAlternateVersions.Where(FileSystem.FileExists).ToArray();
-                if (validPaths.Length != LocalAlternateVersions.Length)
-                {
-                    LocalAlternateVersions = validPaths;
-                    hasChanges = true;
-                }
-            }
+            // Version removal belongs to a successful directory reconciliation or an explicit
+            // delete. FileExists also returns false for offline mounts and inaccessible symlinks.
 
             if (IsStacked)
             {
@@ -650,13 +642,6 @@ namespace MediaBrowser.Controller.Entities
             // Check if the file still exists
             if (!FileSystem.FileExists(path))
             {
-                // File was removed - clean up any orphaned database entry
-                if (LibraryManager.GetItemById(id) is Video orphanedVideo && orphanedVideo.OwnerId.Equals(Id))
-                {
-                    Logger.LogInformation("Owned video file no longer exists, removing orphaned item: {Path}", path);
-                    LibraryManager.DeleteItem(orphanedVideo, new DeleteOptions { DeleteFileLocation = false });
-                }
-
                 return;
             }
 
@@ -698,30 +683,6 @@ namespace MediaBrowser.Controller.Entities
             }
 
             await RefreshMetadataForOwnedItem(video, copyTitleMetadata, newOptions, cancellationToken).ConfigureAwait(false);
-        }
-
-        /// <inheritdoc />
-        public override async Task UpdateToRepositoryAsync(ItemUpdateType updateReason, CancellationToken cancellationToken)
-        {
-            await base.UpdateToRepositoryAsync(updateReason, cancellationToken).ConfigureAwait(false);
-
-            var localAlternates = LibraryManager.GetLocalAlternateVersionIds(this)
-                .Select(i => LibraryManager.GetItemById(i))
-                .Where(i => i is not null);
-
-            foreach (var item in localAlternates)
-            {
-                item.ImageInfos = ImageInfos;
-                item.Overview = Overview;
-                item.ProductionYear = ProductionYear;
-                item.PremiereDate = PremiereDate;
-                item.CommunityRating = CommunityRating;
-                item.OfficialRating = OfficialRating;
-                item.Genres = Genres;
-                item.ProviderIds = ProviderIds;
-
-                await item.UpdateToRepositoryAsync(ItemUpdateType.MetadataDownload, cancellationToken).ConfigureAwait(false);
-            }
         }
 
         public override IEnumerable<FileSystemMetadata> GetDeletePaths()

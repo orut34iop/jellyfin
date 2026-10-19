@@ -204,7 +204,7 @@ namespace MediaBrowser.Providers.MediaInfo
             // Rescan
             if (downloadedLanguages.Count > 0)
             {
-                await video.RefreshMetadata(cancellationToken).ConfigureAwait(false);
+                await video.RefreshMetadata(MetadataRefreshOptions.ForExternalStreams(new DirectoryService(BaseItem.FileSystem)), cancellationToken).ConfigureAwait(false);
                 return false;
             }
 

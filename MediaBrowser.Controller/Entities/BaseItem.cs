@@ -1512,7 +1512,7 @@ namespace MediaBrowser.Controller.Entities
             options = EnsureLocalMetadataOnlyDirectoryService(options);
             var requiresSave = false;
 
-            if (SupportsOwnedItems)
+            if (SupportsOwnedItems && !options.RefreshMediaInfoOnly && options.MetadataRefreshMode != MetadataRefreshMode.None)
             {
                 try
                 {
@@ -2777,6 +2777,11 @@ namespace MediaBrowser.Controller.Entities
         /// <returns><c>true</c> if the owned item was changed, else <c>false</c>.</returns>
         internal static bool InheritDatesFromOwner(BaseItem owner, BaseItem ownedItem)
         {
+            if (ownedItem.IsLocked)
+            {
+                return false;
+            }
+
             // Extras have no release date of their own, so the owner's is authoritative.
             var changed = false;
 
@@ -2802,62 +2807,76 @@ namespace MediaBrowser.Controller.Entities
                 SearchResult = null
             };
 
-            var item = this;
-
-            if (copyTitleMetadata)
+            using (await MetadataUpdateLock.AcquireAsync(ownedItem.Id, cancellationToken).ConfigureAwait(false))
             {
-                // Take some data from the main item, for querying purposes
-                if (!item.Genres.SequenceEqual(ownedItem.Genres, StringComparer.Ordinal))
+                ownedItem = LibraryManager.GetItemById(ownedItem.Id) ?? ownedItem;
+                var item = this;
+
+                if (copyTitleMetadata && !options.RefreshMediaInfoOnly && !ownedItem.IsLocked)
                 {
-                    newOptions.ForceSave = true;
-                    ownedItem.Genres = item.Genres;
+                    // Take some data from the main item, for querying purposes
+                    if (!ownedItem.LockedFields.Contains(MetadataField.Genres)
+                        && !item.Genres.SequenceEqual(ownedItem.Genres, StringComparer.Ordinal))
+                    {
+                        newOptions.ForceSave = true;
+                        ownedItem.Genres = item.Genres;
+                    }
+
+                    if (!ownedItem.LockedFields.Contains(MetadataField.Studios)
+                        && !item.Studios.SequenceEqual(ownedItem.Studios, StringComparer.Ordinal))
+                    {
+                        newOptions.ForceSave = true;
+                        ownedItem.Studios = item.Studios;
+                    }
+
+                    if (!ownedItem.LockedFields.Contains(MetadataField.ProductionLocations)
+                        && !item.ProductionLocations.SequenceEqual(ownedItem.ProductionLocations, StringComparer.Ordinal))
+                    {
+                        newOptions.ForceSave = true;
+                        ownedItem.ProductionLocations = item.ProductionLocations;
+                    }
+
+                    if (item.CommunityRating != ownedItem.CommunityRating)
+                    {
+                        ownedItem.CommunityRating = item.CommunityRating;
+                        newOptions.ForceSave = true;
+                    }
+
+                    if (item.CriticRating != ownedItem.CriticRating)
+                    {
+                        ownedItem.CriticRating = item.CriticRating;
+                        newOptions.ForceSave = true;
+                    }
+
+                    if (!ownedItem.LockedFields.Contains(MetadataField.Overview)
+                        && !string.Equals(item.Overview, ownedItem.Overview, StringComparison.Ordinal))
+                    {
+                        ownedItem.Overview = item.Overview;
+                        newOptions.ForceSave = true;
+                    }
+
+                    if (!ownedItem.LockedFields.Contains(MetadataField.OfficialRating)
+                        && !string.Equals(item.OfficialRating, ownedItem.OfficialRating, StringComparison.Ordinal))
+                    {
+                        ownedItem.OfficialRating = item.OfficialRating;
+                        newOptions.ForceSave = true;
+                    }
+
+                    if (!string.Equals(item.CustomRating, ownedItem.CustomRating, StringComparison.Ordinal))
+                    {
+                        ownedItem.CustomRating = item.CustomRating;
+                        newOptions.ForceSave = true;
+                    }
+
+                    if (InheritDatesFromOwner(item, ownedItem))
+                    {
+                        newOptions.ForceSave = true;
+                    }
                 }
 
-                if (!item.Studios.SequenceEqual(ownedItem.Studios, StringComparer.Ordinal))
+                if (copyTitleMetadata && newOptions.ForceSave)
                 {
-                    newOptions.ForceSave = true;
-                    ownedItem.Studios = item.Studios;
-                }
-
-                if (!item.ProductionLocations.SequenceEqual(ownedItem.ProductionLocations, StringComparer.Ordinal))
-                {
-                    newOptions.ForceSave = true;
-                    ownedItem.ProductionLocations = item.ProductionLocations;
-                }
-
-                if (item.CommunityRating != ownedItem.CommunityRating)
-                {
-                    ownedItem.CommunityRating = item.CommunityRating;
-                    newOptions.ForceSave = true;
-                }
-
-                if (item.CriticRating != ownedItem.CriticRating)
-                {
-                    ownedItem.CriticRating = item.CriticRating;
-                    newOptions.ForceSave = true;
-                }
-
-                if (!string.Equals(item.Overview, ownedItem.Overview, StringComparison.Ordinal))
-                {
-                    ownedItem.Overview = item.Overview;
-                    newOptions.ForceSave = true;
-                }
-
-                if (!string.Equals(item.OfficialRating, ownedItem.OfficialRating, StringComparison.Ordinal))
-                {
-                    ownedItem.OfficialRating = item.OfficialRating;
-                    newOptions.ForceSave = true;
-                }
-
-                if (!string.Equals(item.CustomRating, ownedItem.CustomRating, StringComparison.Ordinal))
-                {
-                    ownedItem.CustomRating = item.CustomRating;
-                    newOptions.ForceSave = true;
-                }
-
-                if (InheritDatesFromOwner(item, ownedItem))
-                {
-                    newOptions.ForceSave = true;
+                    await ownedItem.UpdateToRepositoryAsync(ItemUpdateType.MetadataImport, cancellationToken).ConfigureAwait(false);
                 }
             }
 

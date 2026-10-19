@@ -179,28 +179,53 @@ namespace Emby.Server.Implementations.Library
             var mediaSources = GetStaticMediaSources(item, enablePathSubstitution, user);
             ResolveSymlinkPaths(mediaSources, enablePathSubstitution);
 
-            // Playback needs current stream information, not a reimport of NFO or online metadata.
-            if (allowMediaProbe && mediaSources[0].Type != MediaSourceType.Placeholder
-                && (item.Path.EndsWith(".strm", StringComparison.OrdinalIgnoreCase)
-                    || (item.MediaType == MediaType.Video && mediaSources[0].MediaStreams.All(i => i.Type != MediaStreamType.Video))
-                    || (item.MediaType == MediaType.Audio && mediaSources[0].MediaStreams.All(i => i.Type != MediaStreamType.Audio))))
-            {
-                await item.RefreshMetadata(
-                    new MetadataRefreshOptions(_directoryService)
-                    {
-                        EnableRemoteContentProbe = true,
-                        RefreshMediaInfoOnly = true,
-                        ImageRefreshMode = MetadataRefreshMode.None,
-                        MetadataRefreshMode = MetadataRefreshMode.FullRefresh
-                    },
-                    cancellationToken).ConfigureAwait(false);
-
-                mediaSources = GetStaticMediaSources(item, enablePathSubstitution, user);
-                ResolveSymlinkPaths(mediaSources, enablePathSubstitution);
-            }
-
             if (allowMediaProbe)
             {
+                var refreshed = false;
+                var requiredStreamType = item.MediaType == MediaType.Audio ? MediaStreamType.Audio : MediaStreamType.Video;
+                foreach (var source in mediaSources)
+                {
+                    if (source.Type == MediaSourceType.Placeholder || !source.SupportsProbing
+                        || source.MediaStreams.Any(stream => stream.Type == requiredStreamType)
+                        || !Guid.TryParse(source.Id, out var sourceId))
+                    {
+                        continue;
+                    }
+
+                    // Sources can be reordered by resume position. Refresh the source's item, not
+                    // the group primary or whichever item happened to receive PlaybackInfo.
+                    var sourceItem = sourceId == item.Id ? item : _libraryManager.GetItemById(sourceId);
+                    if (sourceItem is null || (sourceItem.MediaType != MediaType.Video && sourceItem.MediaType != MediaType.Audio))
+                    {
+                        continue;
+                    }
+
+                    _directoryService.Invalidate(sourceItem.Path);
+                    await sourceItem.RefreshMetadata(
+                        new MetadataRefreshOptions(new DirectoryService(_fileSystem))
+                        {
+                            EnableRemoteContentProbe = true,
+                            RefreshMediaInfoOnly = true,
+                            ProbeMissingStreamsOnly = true,
+                            ImageRefreshMode = MetadataRefreshMode.None,
+                            MetadataRefreshMode = MetadataRefreshMode.FullRefresh
+                        },
+                        cancellationToken).ConfigureAwait(false);
+                    refreshed = true;
+                }
+
+                if (refreshed)
+                {
+                    var currentItem = _libraryManager.GetItemById(item.Id);
+                    if (currentItem is not null && currentItem.Id.Equals(item.Id))
+                    {
+                        item = currentItem;
+                    }
+
+                    mediaSources = GetStaticMediaSources(item, enablePathSubstitution, user);
+                    ResolveSymlinkPaths(mediaSources, enablePathSubstitution);
+                }
+
                 await AddMissingMediaInfoWithProbe(item, mediaSources, cancellationToken).ConfigureAwait(false);
             }
 
@@ -265,6 +290,10 @@ namespace Emby.Server.Implementations.Library
                 try
                 {
                     await AddMediaInfoWithProbe(mediaSource, isAudio, null, false, false, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
                 }
                 catch (Exception ex)
                 {

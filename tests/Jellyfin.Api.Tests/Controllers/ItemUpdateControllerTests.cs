@@ -7,6 +7,7 @@ using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Dto;
+using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.Globalization;
 using MediaBrowser.Model.IO;
 using Moq;
@@ -68,6 +69,25 @@ public class ItemUpdateControllerTests
 
         Assert.Equal(new[] { "Action" }, movie.Genres);
         Assert.Equal("tt1234567", movie.ProviderIds["Imdb"]);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UpdateItem_ProtectedFields_CanBeEditedAndClearedWithoutUnlocking(bool empty)
+    {
+        var locks = new[] { MetadataField.Genres, MetadataField.ProductionLocations, MetadataField.Overview };
+        var movie = new Movie { Genres = ["Old"], ProductionLocations = ["Old"], LockedFields = locks };
+        var request = new BaseItemDto
+        {
+            Genres = empty ? [] : ["Edited"],
+            ProductionLocations = empty ? [] : ["Edited"],
+            LockedFields = locks
+        };
+        await InvokeUpdateItem(request, movie);
+        Assert.Equal(empty ? Array.Empty<string>() : ["Edited"], movie.Genres);
+        Assert.Equal(empty ? Array.Empty<string>() : ["Edited"], movie.ProductionLocations);
+        Assert.Equal(locks, movie.LockedFields);
     }
 
     private Task InvokeUpdateItem(BaseItemDto request, BaseItem item)

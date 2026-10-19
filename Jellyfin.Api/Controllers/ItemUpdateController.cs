@@ -74,6 +74,7 @@ public class ItemUpdateController : BaseJellyfinApiController
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult> UpdateItem([FromRoute, Required] Guid itemId, [FromBody, Required] BaseItemDto request)
     {
+        using var metadataLock = await MetadataUpdateLock.AcquireAsync(itemId, HttpContext.RequestAborted).ConfigureAwait(false);
         var item = _libraryManager.GetItemById<BaseItem>(itemId, User.GetUserId());
         if (item is null)
         {
@@ -114,8 +115,13 @@ public class ItemUpdateController : BaseJellyfinApiController
 
             foreach (var child in folder.GetRecursiveChildren())
             {
-                child.IsLocked = newLockData;
-                await child.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, CancellationToken.None).ConfigureAwait(false);
+                using var childLock = await MetadataUpdateLock.AcquireAsync(child.Id, HttpContext.RequestAborted).ConfigureAwait(false);
+                var currentChild = _libraryManager.GetItemById(child.Id);
+                if (currentChild is not null)
+                {
+                    currentChild.IsLocked = newLockData;
+                    await currentChild.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, CancellationToken.None).ConfigureAwait(false);
+                }
             }
         }
 

@@ -106,10 +106,17 @@ namespace Jellyfin.Providers.Tests.Manager
         [Fact]
         public void MetadataRefreshOptions_Copy_PreservesMediaInfoOnly()
         {
-            var options = new MetadataRefreshOptions(Mock.Of<IDirectoryService>()) { RefreshMediaInfoOnly = true };
-
-            Assert.True(new MetadataRefreshOptions(options).RefreshMediaInfoOnly);
-            Assert.True(new MetadataRefreshOptions(options, Mock.Of<IDirectoryService>()).RefreshMediaInfoOnly);
+            var options = MetadataRefreshOptions.ForExternalStreams(Mock.Of<IDirectoryService>());
+            options.ProbeMissingStreamsOnly = true;
+            options.MediaSourceChanged = true;
+            foreach (var copy in new[] { new MetadataRefreshOptions(options), new MetadataRefreshOptions(options, Mock.Of<IDirectoryService>()) })
+            {
+                Assert.True(copy.RefreshMediaInfoOnly);
+                Assert.True(copy.RefreshExternalStreamsOnly);
+                Assert.True(copy.ProbeMissingStreamsOnly);
+                Assert.True(copy.MediaSourceChanged);
+                Assert.Equal(MetadataRefreshMode.None, copy.ImageRefreshMode);
+            }
         }
 
         [Theory]
@@ -510,6 +517,85 @@ namespace Jellyfin.Providers.Tests.Manager
                 CancellationToken.None).ConfigureAwait(true);
 
             Assert.Equal(stampBefore, item.DateLastRefreshed);
+        }
+
+        [Theory]
+        [InlineData(false, false)]
+        [InlineData(true, false)]
+        [InlineData(true, true)]
+        public async Task RefreshMetadata_LockedNfo_RespectsDestinationLocksAndMissingMode(bool protect, bool empty)
+        {
+            var item = NewStampedTestItem();
+            item.Genres = empty ? [] : ["Edited"];
+            item.ProductionLocations = empty ? [] : ["Edited"];
+            item.LockedFields = protect ? [MetadataField.Genres, MetadataField.ProductionLocations] : [];
+            var provider = new Mock<ILocalMetadataProvider<TestItem>>();
+            provider.Setup(p => p.GetMetadata(It.IsAny<ItemInfo>(), It.IsAny<IDirectoryService>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new MetadataResult<TestItem>
+                {
+                    HasMetadata = true,
+                    Item = new TestItem { IsLocked = true, Genres = ["Original"], ProductionLocations = ["Original"] }
+                });
+            var service = NewService(NewProviderManager([provider.Object]));
+            var options = new MetadataRefreshOptions(Mock.Of<IDirectoryService>())
+            {
+                MetadataRefreshMode = MetadataRefreshMode.FullRefresh,
+                ReplaceAllMetadata = protect,
+                ImageRefreshMode = MetadataRefreshMode.None
+            };
+            await service.RefreshMetadata(item, options, CancellationToken.None);
+            Assert.Equal(empty ? Array.Empty<string>() : ["Edited"], item.Genres);
+            Assert.Equal(empty ? Array.Empty<string>() : ["Edited"], item.ProductionLocations);
+        }
+
+        [Fact]
+        public async Task RefreshMetadata_ImageOnly_DoesNotStampDescriptionOrRunProviders()
+        {
+            var item = NewStampedTestItem();
+            var before = item.DateLastRefreshed;
+            var provider = new Mock<ILocalMetadataProvider<TestItem>>(MockBehavior.Strict);
+            var service = NewService(NewProviderManager([provider.Object]));
+            var options = new MetadataRefreshOptions(Mock.Of<IDirectoryService>())
+            {
+                MetadataRefreshMode = MetadataRefreshMode.None,
+                ImageRefreshMode = MetadataRefreshMode.FullRefresh
+            };
+            await service.RefreshMetadata(item, options, CancellationToken.None);
+            Assert.Equal(before, item.DateLastRefreshed);
+            provider.VerifyNoOtherCalls();
+        }
+
+        [Fact]
+        public async Task RefreshMetadata_EditWaitsForRefreshThenWins()
+        {
+            var item = NewStampedTestItem();
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var finish = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var provider = new Mock<ILocalMetadataProvider<TestItem>>();
+            provider.Setup(p => p.GetMetadata(It.IsAny<ItemInfo>(), It.IsAny<IDirectoryService>(), It.IsAny<CancellationToken>()))
+                .Returns(async () =>
+                {
+                    entered.SetResult();
+                    await finish.Task;
+                    return new MetadataResult<TestItem> { HasMetadata = true, Item = new TestItem { Genres = ["Original"] } };
+                });
+            var service = NewService(NewProviderManager([provider.Object]));
+            var options = new MetadataRefreshOptions(Mock.Of<IDirectoryService>()) { MetadataRefreshMode = MetadataRefreshMode.FullRefresh, ReplaceAllMetadata = true };
+            var refresh = service.RefreshMetadata(item, options, CancellationToken.None);
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+            var editLock = MetadataUpdateLock.AcquireAsync(item.Id, CancellationToken.None).AsTask();
+            Assert.False(editLock.IsCompleted);
+            finish.SetResult();
+            await refresh.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+            using (await editLock.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken))
+            {
+                item.Genres = ["Edited"];
+                item.LockedFields = [MetadataField.Genres];
+                await item.UpdateToRepositoryAsync(ItemUpdateType.MetadataEdit, CancellationToken.None);
+            }
+
+            Assert.Equal(["Edited"], item.Genres);
+            Assert.Equal([MetadataField.Genres], item.LockedFields);
         }
 
         private static TestItem NewStampedTestItem()

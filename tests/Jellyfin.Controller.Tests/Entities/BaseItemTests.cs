@@ -26,7 +26,8 @@ using Xunit;
 
 namespace Jellyfin.Controller.Tests.Entities;
 
-public class BaseItemTests
+[Collection("BaseItem static services")]
+public partial class BaseItemTests
 {
     [Theory]
     [InlineData(false, false)]

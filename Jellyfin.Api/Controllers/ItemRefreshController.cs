@@ -52,6 +52,8 @@ public class ItemRefreshController : BaseJellyfinApiController
     /// <param name="replaceAllMetadata">(Optional) Determines if metadata should be replaced. Only applicable if mode is FullRefresh.</param>
     /// <param name="replaceAllImages">(Optional) Determines if images should be replaced. Only applicable if mode is FullRefresh.</param>
     /// <param name="regenerateTrickplay">(Optional) Determines if trickplay images should be replaced. Only applicable if mode is FullRefresh.</param>
+    /// <param name="refreshMediaInfoOnly">Force technical probing without refreshing descriptive metadata or images.</param>
+    /// <response code="400">Technical-only refresh cannot be combined with metadata or image replacement.</response>
     /// <response code="204">Item metadata refresh queued.</response>
     /// <response code="404">Item to refresh not found.</response>
     /// <returns>An <see cref="NoContentResult"/> on success, or a <see cref="NotFoundResult"/> if the item could not be found.</returns>
@@ -59,23 +61,37 @@ public class ItemRefreshController : BaseJellyfinApiController
     [Description("Refreshes metadata for an item.")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public ActionResult RefreshItem(
         [FromRoute, Required] Guid itemId,
         [FromQuery] MetadataRefreshMode metadataRefreshMode = MetadataRefreshMode.None,
         [FromQuery] MetadataRefreshMode imageRefreshMode = MetadataRefreshMode.None,
         [FromQuery] bool replaceAllMetadata = false,
         [FromQuery] bool replaceAllImages = false,
-        [FromQuery] bool regenerateTrickplay = false)
+        [FromQuery] bool regenerateTrickplay = false,
+        [FromQuery] bool refreshMediaInfoOnly = false)
     {
+        if (refreshMediaInfoOnly && (replaceAllMetadata || replaceAllImages || regenerateTrickplay || imageRefreshMode != MetadataRefreshMode.None))
+        {
+            return BadRequest("Technical-only refresh cannot replace metadata, images or trickplay.");
+        }
+
         var item = _libraryManager.GetItemById<BaseItem>(itemId, User.GetUserId());
         if (item is null)
         {
             return NotFound();
         }
 
+        if (refreshMediaInfoOnly && item is not Video && item is not MediaBrowser.Controller.Entities.Audio.Audio)
+        {
+            return BadRequest("Technical-only refresh requires a video or audio item.");
+        }
+
         var refreshOptions = new MetadataRefreshOptions(new DirectoryService(_fileSystem))
         {
-            MetadataRefreshMode = metadataRefreshMode,
+            MetadataRefreshMode = refreshMediaInfoOnly ? MetadataRefreshMode.FullRefresh : metadataRefreshMode,
+            RefreshMediaInfoOnly = refreshMediaInfoOnly,
+            EnableRemoteContentProbe = refreshMediaInfoOnly,
             ImageRefreshMode = imageRefreshMode,
             ReplaceAllImages = replaceAllImages,
             ReplaceAllMetadata = replaceAllMetadata,

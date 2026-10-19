@@ -88,6 +88,12 @@ namespace MediaBrowser.Providers.Manager
 
         public virtual async Task<ItemUpdateType> RefreshMetadata(BaseItem item, MetadataRefreshOptions refreshOptions, CancellationToken cancellationToken)
         {
+            using var metadataLock = await MetadataUpdateLock.AcquireAsync(item.Id, cancellationToken).ConfigureAwait(false);
+            if (LibraryManager.GetItemById(item.Id) is TItemType currentItem)
+            {
+                item = currentItem;
+            }
+
             var itemOfType = (TItemType)item;
             if (refreshOptions.RefreshMediaInfoOnly)
             {
@@ -152,9 +158,12 @@ namespace MediaBrowser.Providers.Manager
                 Item = itemOfType
             };
 
-            var beforeSaveResult = await BeforeSave(itemOfType, isFirstRefresh || refreshOptions.ReplaceAllMetadata || refreshOptions.MetadataRefreshMode == MetadataRefreshMode.FullRefresh || requiresRefresh || refreshOptions.ForceSave, updateType)
-                .ConfigureAwait(false);
-            updateType |= beforeSaveResult;
+            if (refreshOptions.MetadataRefreshMode != MetadataRefreshMode.None)
+            {
+                var beforeSaveResult = await BeforeSave(itemOfType, isFirstRefresh || refreshOptions.ReplaceAllMetadata || refreshOptions.MetadataRefreshMode == MetadataRefreshMode.FullRefresh || requiresRefresh || refreshOptions.ForceSave, updateType)
+                    .ConfigureAwait(false);
+                updateType |= beforeSaveResult;
+            }
 
             if (isFirstRefresh)
             {
@@ -223,7 +232,7 @@ namespace MediaBrowser.Providers.Manager
 
             var refreshStampNeedsSaving = false;
 
-            if (hasRefreshedMetadata && hasRefreshedImages && attemptedFetch)
+            if (hasRefreshedMetadata && hasRefreshedImages && attemptedFetch && refreshOptions.MetadataRefreshMode != MetadataRefreshMode.None)
             {
                 item.DateLastRefreshed = DateTime.UtcNow;
                 updateType |= item.OnMetadataChanged();
@@ -237,7 +246,10 @@ namespace MediaBrowser.Providers.Manager
 
             updateType = await SaveInternal(item, refreshOptions, updateType, isFirstRefresh, requiresRefresh, refreshStampNeedsSaving, metadataResult, cancellationToken).ConfigureAwait(false);
 
-            await AfterMetadataRefresh(itemOfType, refreshOptions, cancellationToken).ConfigureAwait(false);
+            if (refreshOptions.MetadataRefreshMode != MetadataRefreshMode.None)
+            {
+                await AfterMetadataRefresh(itemOfType, refreshOptions, cancellationToken).ConfigureAwait(false);
+            }
 
             return updateType;
 
@@ -276,6 +288,15 @@ namespace MediaBrowser.Providers.Manager
 
         private async Task<ItemUpdateType> RefreshMediaInfo(TItemType item, MetadataRefreshOptions options, CancellationToken cancellationToken)
         {
+            if (options.ProbeMissingStreamsOnly)
+            {
+                var streamType = item is Audio ? MediaStreamType.Audio : MediaStreamType.Video;
+                if (item.GetMediaStreams().Any(stream => stream.Type == streamType))
+                {
+                    return ItemUpdateType.None;
+                }
+            }
+
             var libraryOptions = LibraryManager.GetLibraryOptions(item);
             var providers = ProviderManager.GetMetadataProviders<TItemType>(item, libraryOptions, options)
                 .Where(provider => provider is IMediaInfoProvider)
@@ -291,7 +312,7 @@ namespace MediaBrowser.Providers.Manager
 
             if (result.UpdateType != ItemUpdateType.None)
             {
-                await SaveItemAsync(new MetadataResult<TItemType> { Item = item }, result.UpdateType, false, cancellationToken).ConfigureAwait(false);
+                await SaveItemAsync(new MetadataResult<TItemType> { Item = item }, ItemUpdateType.MediaInfo, false, cancellationToken).ConfigureAwait(false);
             }
 
             return result.UpdateType;
@@ -949,17 +970,10 @@ namespace MediaBrowser.Providers.Manager
                         MergeData(metadata, temp, [], false, false);
                     }
 
-                    if (isLocalLocked)
-                    {
-                        MergeData(temp, metadata, item.LockedFields, true, true);
-                    }
-                    else
-                    {
-                        var shouldReplace = (options.MetadataRefreshMode > MetadataRefreshMode.ValidationOnly && options.ReplaceAllMetadata)
-                            // Case for Scan for new and updated files
-                            || (options.MetadataRefreshMode == MetadataRefreshMode.Default && !options.ReplaceAllMetadata);
-                        MergeData(temp, metadata, item.LockedFields, shouldReplace, true);
-                    }
+                    // A source lock does not turn a missing-metadata request into replacement.
+                    var shouldReplace = (options.MetadataRefreshMode > MetadataRefreshMode.ValidationOnly && options.ReplaceAllMetadata)
+                        || (options.MetadataRefreshMode == MetadataRefreshMode.Default && !options.ReplaceAllMetadata);
+                    MergeData(temp, metadata, item.LockedFields, shouldReplace, true);
                 }
             }
 
@@ -1318,10 +1332,6 @@ namespace MediaBrowser.Providers.Manager
                 {
                     target.Studios = source.Studios;
                 }
-                else
-                {
-                    target.Studios = target.Studios.Concat(source.Studios).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-                }
             }
 
             if (!lockedFields.Contains(MetadataField.Tags))
@@ -1330,10 +1340,6 @@ namespace MediaBrowser.Providers.Manager
                 {
                     target.Tags = source.Tags;
                 }
-                else
-                {
-                    target.Tags = target.Tags.Concat(source.Tags).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-                }
             }
 
             if (!lockedFields.Contains(MetadataField.ProductionLocations))
@@ -1341,10 +1347,6 @@ namespace MediaBrowser.Providers.Manager
                 if (replaceData || target.ProductionLocations.Length == 0)
                 {
                     target.ProductionLocations = source.ProductionLocations;
-                }
-                else
-                {
-                    target.ProductionLocations = target.ProductionLocations.Concat(source.ProductionLocations).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
                 }
             }
 

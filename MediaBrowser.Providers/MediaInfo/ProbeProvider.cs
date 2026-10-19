@@ -325,9 +325,14 @@ namespace MediaBrowser.Providers.MediaInfo
                 return _cachedTask;
             }
 
-            if (item.IsShortcut)
+            if (item.IsShortcut && !options.RefreshExternalStreamsOnly)
             {
+                var previousTarget = item.ShortcutPath;
                 FetchShortcutInfo(item);
+                if (!string.IsNullOrEmpty(previousTarget) && !string.Equals(previousTarget, item.ShortcutPath, StringComparison.Ordinal))
+                {
+                    options = new MetadataRefreshOptions(options) { MediaSourceChanged = true };
+                }
             }
 
             return _videoProber.ProbeVideo(item, options, cancellationToken);
@@ -388,9 +393,14 @@ namespace MediaBrowser.Providers.MediaInfo
                 return _cachedTask;
             }
 
-            if (item.IsShortcut)
+            if (item.IsShortcut && !options.RefreshExternalStreamsOnly)
             {
+                var previousTarget = item.ShortcutPath;
                 FetchShortcutInfo(item);
+                if (!string.IsNullOrEmpty(previousTarget) && !string.Equals(previousTarget, item.ShortcutPath, StringComparison.Ordinal))
+                {
+                    options = new MetadataRefreshOptions(options) { MediaSourceChanged = true };
+                }
             }
 
             return _audioProber.Probe(item, options, cancellationToken);

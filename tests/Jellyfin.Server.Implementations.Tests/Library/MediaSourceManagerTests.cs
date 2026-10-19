@@ -267,7 +267,7 @@ namespace Jellyfin.Server.Implementations.Tests.Library
 
             var mediaSource = new MediaSourceInfo
             {
-                Id = "source",
+                Id = Guid.NewGuid().ToString("N"),
                 Path = path,
                 Protocol = MediaProtocol.File,
                 Type = MediaSourceType.Default,
@@ -277,10 +277,12 @@ namespace Jellyfin.Server.Implementations.Tests.Library
             video.Setup(v => v.GetMediaSources(It.IsAny<bool>())).Returns(new[] { mediaSource });
             var item = video.Object;
             item.Path = mediaSource.Path;
+            item.Id = Guid.Parse(mediaSource.Id);
 
             var libraryManager = new Mock<ILibraryManager>(MockBehavior.Strict);
             libraryManager.Setup(i => i.GetLibraryOptions(item))
                 .Returns(new LibraryOptions());
+            libraryManager.Setup(i => i.GetItemById(item.Id)).Returns(item);
             BaseItem.LibraryManager = libraryManager.Object;
 
             var providerManager = new Mock<IProviderManager>(MockBehavior.Strict);
@@ -325,7 +327,7 @@ namespace Jellyfin.Server.Implementations.Tests.Library
                     ]
                 });
 
-            var mediaSourceManager = CreateMediaSourceManager(mediaEncoder.Object);
+            var mediaSourceManager = CreateMediaSourceManager(mediaEncoder.Object, libraryManager.Object);
 
             var mediaSources = await mediaSourceManager.GetPlaybackMediaSources(item, null, true, false, CancellationToken.None);
 
@@ -339,11 +341,75 @@ namespace Jellyfin.Server.Implementations.Tests.Library
                 Times.Once);
         }
 
-        private static MediaSourceManager CreateMediaSourceManager(IMediaEncoder mediaEncoder)
+        [Theory]
+        [InlineData("/media/movie.mp4")]
+        [InlineData("/media/movie.strm")]
+        public async Task GetPlaybackMediaSources_PersistedStreams_DoesNotRefresh(string path)
+        {
+            var source = new MediaSourceInfo
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Path = path,
+                Protocol = MediaProtocol.File,
+                Type = MediaSourceType.Default,
+                MediaStreams = [new MediaStream { Type = MediaStreamType.Video, Codec = "h264" }]
+            };
+            var video = new Mock<Video> { CallBase = true };
+            video.Setup(v => v.GetMediaSources(It.IsAny<bool>())).Returns([source]);
+            video.Object.Id = Guid.Parse(source.Id);
+            video.Object.Path = path;
+            var providers = new Mock<IProviderManager>(MockBehavior.Strict);
+            BaseItem.ProviderManager = providers.Object;
+            var encoder = new Mock<IMediaEncoder>(MockBehavior.Strict);
+            var manager = CreateMediaSourceManager(encoder.Object);
+
+            await manager.GetPlaybackMediaSources(video.Object, null, true, false, CancellationToken.None);
+            await manager.GetPlaybackMediaSources(video.Object, null, true, false, CancellationToken.None);
+
+            providers.VerifyNoOtherCalls();
+            encoder.VerifyNoOtherCalls();
+        }
+
+        [Fact]
+        public async Task GetPlaybackMediaSources_ReorderedVersions_RefreshesMissingVersionOnly()
+        {
+            var primaryId = Guid.NewGuid();
+            var other = new Video { Id = Guid.NewGuid(), Path = "/media/alternate.mkv" };
+            var missing = new MediaSourceInfo { Id = other.Id.ToString("N"), Path = other.Path, Protocol = MediaProtocol.File };
+            var complete = new MediaSourceInfo
+            {
+                Id = primaryId.ToString("N"), Path = "/media/primary.mkv", Protocol = MediaProtocol.File,
+                MediaStreams = [new MediaStream { Type = MediaStreamType.Video }]
+            };
+            var primary = new Mock<Video> { CallBase = true };
+            primary.Object.Id = primaryId;
+            primary.Object.Path = complete.Path;
+            primary.Setup(v => v.GetMediaSources(It.IsAny<bool>())).Returns([missing, complete]);
+            var library = new Mock<ILibraryManager>();
+            library.Setup(l => l.GetItemById(other.Id)).Returns(other);
+            library.Setup(l => l.GetLibraryOptions(It.IsAny<BaseItem>())).Returns(new LibraryOptions());
+            BaseItem.LibraryManager = library.Object;
+            var providers = new Mock<IProviderManager>(MockBehavior.Strict);
+            providers.Setup(p => p.RefreshSingleItem(other, It.Is<MetadataRefreshOptions>(o => o.RefreshMediaInfoOnly && o.ProbeMissingStreamsOnly), It.IsAny<CancellationToken>()))
+                .Callback(() => missing.MediaStreams = [new MediaStream { Type = MediaStreamType.Video }])
+                .ReturnsAsync(ItemUpdateType.MediaInfo);
+            BaseItem.ProviderManager = providers.Object;
+            var encoder = new Mock<IMediaEncoder>(MockBehavior.Strict);
+            var manager = CreateMediaSourceManager(encoder.Object, library.Object);
+            await manager.GetPlaybackMediaSources(primary.Object, null, true, false, CancellationToken.None);
+            providers.Verify(p => p.RefreshSingleItem(other, It.IsAny<MetadataRefreshOptions>(), It.IsAny<CancellationToken>()), Times.Once);
+            encoder.VerifyNoOtherCalls();
+        }
+
+        private static MediaSourceManager CreateMediaSourceManager(IMediaEncoder mediaEncoder, ILibraryManager? library = null)
         {
             IFixture fixture = new Fixture().Customize(new AutoMoqCustomization { ConfigureMembers = true });
             fixture.Inject<IFileSystem>(fixture.Create<ManagedFileSystem>());
             fixture.Inject(mediaEncoder);
+            if (library is not null)
+            {
+                fixture.Inject(library);
+            }
 
             var applicationPaths = new Mock<IApplicationPaths>();
             applicationPaths.Setup(i => i.CachePath)

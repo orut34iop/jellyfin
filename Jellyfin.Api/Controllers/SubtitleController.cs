@@ -160,7 +160,7 @@ public class SubtitleController : BaseJellyfinApiController
             await _subtitleManager.DownloadSubtitles(item, subtitleId, CancellationToken.None)
                 .ConfigureAwait(false);
 
-            _providerManager.QueueRefresh(item.Id, new MetadataRefreshOptions(new DirectoryService(_fileSystem)), RefreshPriority.High);
+            _providerManager.QueueRefresh(item.Id, MetadataRefreshOptions.ForExternalStreams(new DirectoryService(_fileSystem)), RefreshPriority.High);
         }
         catch (Exception ex)
         {
@@ -449,7 +449,7 @@ public class SubtitleController : BaseJellyfinApiController
                         IsHearingImpaired = body.IsHearingImpaired,
                         Stream = stream
                     }).ConfigureAwait(false);
-                _providerManager.QueueRefresh(item.Id, new MetadataRefreshOptions(new DirectoryService(_fileSystem)), RefreshPriority.High);
+                _providerManager.QueueRefresh(item.Id, MetadataRefreshOptions.ForExternalStreams(new DirectoryService(_fileSystem)), RefreshPriority.High);
 
                 return NoContent();
             }

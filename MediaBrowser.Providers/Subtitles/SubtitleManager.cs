@@ -402,7 +402,7 @@ namespace MediaBrowser.Providers.Subtitles
 
             _directoryService.Invalidate(path);
 
-            return item.RefreshMetadata(CancellationToken.None);
+            return item.RefreshMetadata(MetadataRefreshOptions.ForExternalStreams(new DirectoryService(_fileSystem)), CancellationToken.None);
         }
 
         /// <inheritdoc />

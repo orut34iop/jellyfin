@@ -1262,6 +1262,10 @@ namespace MediaBrowser.Providers.Manager
         private async Task RefreshItem(BaseItem item, MetadataRefreshOptions options, CancellationToken cancellationToken)
         {
             await item.RefreshMetadata(options, cancellationToken).ConfigureAwait(false);
+            if (options.RefreshMediaInfoOnly)
+            {
+                return;
+            }
 
             // Collection folders don't validate their children so we'll have to simulate that here
             switch (item)

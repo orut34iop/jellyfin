@@ -91,6 +91,9 @@ namespace MediaBrowser.Providers.MediaInfo
         {
             var path = item.Path;
             var protocol = item.PathProtocol ?? MediaProtocol.File;
+            var originalPath = item.Path;
+            var shortcutPath = item.ShortcutPath;
+            var modified = item.DateModified;
 
             if (!item.IsShortcut || options.EnableRemoteContentProbe)
             {
@@ -115,7 +118,27 @@ namespace MediaBrowser.Providers.MediaInfo
 
                 cancellationToken.ThrowIfCancellationRequested();
 
+                if (!string.Equals(originalPath, item.Path, StringComparison.Ordinal)
+                    || !string.Equals(shortcutPath, item.ShortcutPath, StringComparison.Ordinal)
+                    || modified != item.DateModified
+                    || !result.MediaStreams.Any(stream => stream.Type == MediaStreamType.Audio))
+                {
+                    return ItemUpdateType.None;
+                }
+
                 await FetchAsync(item, result, options, cancellationToken).ConfigureAwait(false);
+            }
+
+            if (options.MediaSourceChanged && !options.EnableRemoteContentProbe)
+            {
+                item.RunTimeTicks = null;
+                item.TotalBitrate = null;
+                item.Container = null;
+                _mediaStreamRepository.SaveMediaStreams(item.Id, item.GetMediaStreams().Where(stream => stream.IsExternal).ToArray(), cancellationToken);
+                if (item is AudioBook)
+                {
+                    _chapterManager.SaveChapters(item, []);
+                }
             }
 
             return ItemUpdateType.MetadataImport;

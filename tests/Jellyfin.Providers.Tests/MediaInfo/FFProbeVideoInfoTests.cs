@@ -3,10 +3,12 @@ using System.Threading;
 using System.Threading.Tasks;
 using AutoFixture;
 using AutoFixture.AutoMoq;
+using MediaBrowser.Controller.Chapters;
 using MediaBrowser.Controller.Configuration;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaEncoding;
+using MediaBrowser.Controller.Persistence;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Model.Configuration;
 using MediaBrowser.Model.Entities;
@@ -246,6 +248,78 @@ public class FFProbeVideoInfoTests
         mediaEncoder.Verify(
             i => i.GetMediaInfo(It.IsAny<MediaInfoRequest>(), It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ProbeVideo_ExternalStreamsOnly_PreservesEmbeddedStreamsChaptersAndAttachments(bool localOnly)
+    {
+        var videoMock = new Mock<Video> { CallBase = true };
+        var video = videoMock.Object;
+        video.Id = Guid.NewGuid();
+        video.Path = "/media/movie.mkv";
+        video.RunTimeTicks = TimeSpan.TicksPerHour;
+        video.Genres = ["Edited"];
+        var embedded = new MediaStream { Type = MediaStreamType.Video, Codec = "h264", Width = 1920, Height = 1080 };
+        var removed = new MediaStream { Type = MediaStreamType.Subtitle, IsExternal = true, Path = "/media/removed.srt" };
+        videoMock.Setup(v => v.GetMediaStreams()).Returns([embedded, removed]);
+        var fileSystem = new Mock<IFileSystem>();
+        fileSystem.Setup(f => f.GetFileSystemEntryPaths(It.IsAny<string>())).Returns(["/media/movie.mkv"]);
+        BaseItem.FileSystem = fileSystem.Object;
+        BaseItem.MediaSourceManager = Mock.Of<IMediaSourceManager>(m => m.GetPathProtocol(It.IsAny<string>()) == MediaProtocol.File);
+        var library = new Mock<ILibraryManager>();
+        library.Setup(l => l.GetLibraryOptions(video)).Returns(new LibraryOptions { LocalMetadataOnlyImport = localOnly });
+        var encoder = new Mock<IMediaEncoder>(MockBehavior.Strict);
+        var attachments = new Mock<IMediaAttachmentRepository>(MockBehavior.Strict);
+        var chapters = new Mock<IChapterManager>(MockBehavior.Strict);
+        var streams = new Mock<IMediaStreamRepository>();
+        IFixture fixture = new Fixture().Customize(new AutoMoqCustomization { ConfigureMembers = true });
+        fixture.Inject(fileSystem.Object);
+        fixture.Inject(library.Object);
+        fixture.Inject(encoder.Object);
+        fixture.Inject(attachments.Object);
+        fixture.Inject(chapters.Object);
+        fixture.Inject(streams.Object);
+        var prober = fixture.Create<FFProbeVideoInfo>();
+        var options = MetadataRefreshOptions.ForExternalStreams(new DirectoryService(fileSystem.Object));
+        await prober.ProbeVideo(video, options, CancellationToken.None);
+        Assert.Equal(TimeSpan.TicksPerHour, video.RunTimeTicks);
+        Assert.Equal(["Edited"], video.Genres);
+        Assert.False(video.HasSubtitles);
+        streams.Verify(r => r.SaveMediaStreams(video.Id, It.Is<System.Collections.Generic.IReadOnlyList<MediaStream>>(s => s.Count == 1 && s[0].Codec == "h264"), It.IsAny<CancellationToken>()), Times.Once);
+        encoder.VerifyNoOtherCalls();
+        attachments.VerifyNoOtherCalls();
+        chapters.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ProbeVideo_InvalidOrObsoleteResult_DoesNotReplaceExistingInformation(bool changedDuringProbe)
+    {
+        var video = new Video { Id = Guid.NewGuid(), Path = "/media/movie.mkv", RunTimeTicks = 123, Genres = ["Edited"] };
+        var library = new Mock<ILibraryManager>();
+        library.Setup(l => l.GetLibraryOptions(video)).Returns(new LibraryOptions());
+        var encoder = new Mock<IMediaEncoder>();
+        encoder.Setup(e => e.GetMediaInfo(It.IsAny<MediaInfoRequest>(), It.IsAny<CancellationToken>()))
+            .Callback(() =>
+            {
+                if (changedDuringProbe)
+                {
+                    video.Path = "/media/replacement.mkv";
+                }
+            })
+            .ReturnsAsync(new MediaBrowser.Model.MediaInfo.MediaInfo
+            {
+                RunTimeTicks = 456,
+                MediaStreams = changedDuringProbe ? [new MediaStream { Type = MediaStreamType.Video }] : []
+            });
+        var prober = CreateFFProbeVideoInfo(encoder.Object, library.Object);
+        var options = new MetadataRefreshOptions(Mock.Of<IDirectoryService>(MockBehavior.Strict)) { RefreshMediaInfoOnly = true };
+        Assert.Equal(ItemUpdateType.None, await prober.ProbeVideo(video, options, CancellationToken.None));
+        Assert.Equal(123, video.RunTimeTicks);
+        Assert.Equal(["Edited"], video.Genres);
     }
 
     private static FFProbeVideoInfo CreateFFProbeVideoInfo(IMediaEncoder mediaEncoder, ILibraryManager libraryManager, IFileSystem? fileSystem = null)

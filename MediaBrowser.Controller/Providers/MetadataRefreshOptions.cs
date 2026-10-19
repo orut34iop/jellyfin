@@ -58,6 +58,38 @@ namespace MediaBrowser.Controller.Providers
         /// </summary>
         public bool RefreshMediaInfoOnly { get; set; }
 
+        /// <summary>
+        /// Gets or sets a value indicating whether only external streams should be rediscovered,
+        /// without probing the media file or replacing embedded streams, attachments or chapters.
+        /// </summary>
+        public bool RefreshExternalStreamsOnly { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether a playback probe should be skipped if another
+        /// request has already persisted the required primary stream.
+        /// </summary>
+        public bool ProbeMissingStreamsOnly { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether the shortcut target was confirmed to have changed.
+        /// Technical information belonging to its previous target must not be reused.
+        /// </summary>
+        public bool MediaSourceChanged { get; set; }
+
+        /// <summary>
+        /// Creates a refresh limited to external audio and subtitle discovery.
+        /// </summary>
+        /// <param name="directoryService">A directory service with current filesystem contents.</param>
+        /// <returns>The refresh options.</returns>
+        public static MetadataRefreshOptions ForExternalStreams(IDirectoryService directoryService)
+            => new(directoryService)
+            {
+                RefreshMediaInfoOnly = true,
+                RefreshExternalStreamsOnly = true,
+                MetadataRefreshMode = MetadataRefreshMode.Default,
+                ImageRefreshMode = MetadataRefreshMode.None
+            };
+
         public bool RefreshItem(BaseItem item)
         {
             if (RefreshPaths is not null && RefreshPaths.Length > 0)
@@ -75,6 +107,9 @@ namespace MediaBrowser.Controller.Providers
             ReplaceAllMetadata = copy.ReplaceAllMetadata;
             EnableRemoteContentProbe = copy.EnableRemoteContentProbe;
             RefreshMediaInfoOnly = copy.RefreshMediaInfoOnly;
+            RefreshExternalStreamsOnly = copy.RefreshExternalStreamsOnly;
+            ProbeMissingStreamsOnly = copy.ProbeMissingStreamsOnly;
+            MediaSourceChanged = copy.MediaSourceChanged;
 
             IsAutomated = copy.IsAutomated;
             ImageRefreshMode = copy.ImageRefreshMode;

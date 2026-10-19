@@ -25,6 +25,14 @@ public interface IItemPersistenceService
     void SaveItems(IReadOnlyList<BaseItem> items, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Updates technical media information on an existing item without rewriting metadata or relationships.
+    /// </summary>
+    /// <param name="item">The item containing the technical information.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    Task SaveMediaInfoAsync(BaseItem item, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Saves image info for an item.
     /// </summary>
     /// <param name="item">The item.</param>

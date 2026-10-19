@@ -81,17 +81,27 @@ namespace MediaBrowser.Providers.MediaInfo
             where T : Video
         {
             if (LocalMetadataOnlyImportPolicy.IsEnabledForItem(item, _libraryManager)
-                && !options.EnableRemoteContentProbe)
+                && !options.EnableRemoteContentProbe
+                && !options.RefreshExternalStreamsOnly)
             {
                 _logger.LogDebug("LocalMetadataOnlyImport enabled; skipping media file probing for {Path}", item.Path ?? item.Name);
                 return ItemUpdateType.MetadataImport;
             }
 
+            if (options.RefreshExternalStreamsOnly && item.IsFileProtocol
+                && !options.DirectoryService.IsAccessible(item.ContainingFolderPath))
+            {
+                return ItemUpdateType.None;
+            }
+
+            var sourcePath = item.Path;
+            var shortcutPath = item.ShortcutPath;
+            var modified = item.DateModified;
             BlurayDiscInfo? blurayDiscInfo = null;
 
             Model.MediaInfo.MediaInfo? mediaInfoResult = null;
 
-            if (!item.IsShortcut || options.EnableRemoteContentProbe)
+            if (!options.RefreshExternalStreamsOnly && (!item.IsShortcut || options.EnableRemoteContentProbe))
             {
                 if (item.VideoType == VideoType.Dvd)
                 {
@@ -154,6 +164,14 @@ namespace MediaBrowser.Providers.MediaInfo
                 cancellationToken.ThrowIfCancellationRequested();
             }
 
+            if (!string.Equals(sourcePath, item.Path, StringComparison.Ordinal)
+                || !string.Equals(shortcutPath, item.ShortcutPath, StringComparison.Ordinal)
+                || modified != item.DateModified
+                || (mediaInfoResult is not null && !mediaInfoResult.MediaStreams.Any(stream => stream.Type == MediaStreamType.Video)))
+            {
+                return ItemUpdateType.None;
+            }
+
             await Fetch(item, cancellationToken, mediaInfoResult, blurayDiscInfo, options).ConfigureAwait(false);
 
             return ItemUpdateType.MetadataImport;
@@ -201,22 +219,13 @@ namespace MediaBrowser.Providers.MediaInfo
             IReadOnlyList<MediaAttachment> mediaAttachments;
             ChapterInfo[] chapters;
 
-            await AddExternalAudioAsync(video, mediaStreams, options, cancellationToken).ConfigureAwait(false);
+            var audioFiles = await AddExternalAudioAsync(video, mediaStreams, options, cancellationToken).ConfigureAwait(false);
 
             if (mediaInfo is not null)
             {
                 mediaStreams.AddRange(mediaInfo.MediaStreams);
 
                 mediaAttachments = mediaInfo.MediaAttachments;
-                video.TotalBitrate = mediaInfo.Bitrate;
-                video.RunTimeTicks = mediaInfo.RunTimeTicks;
-                video.Container = mediaInfo.Container;
-                var videoType = video.VideoType;
-                if (videoType == VideoType.BluRay || videoType == VideoType.Dvd)
-                {
-                    video.Size = mediaInfo.Size;
-                }
-
                 chapters = mediaInfo.Chapters ?? [];
                 if (blurayInfo is not null)
                 {
@@ -225,7 +234,7 @@ namespace MediaBrowser.Providers.MediaInfo
             }
             else
             {
-                foreach (var mediaStream in video.GetMediaStreams())
+                foreach (var mediaStream in options.MediaSourceChanged ? Array.Empty<MediaStream>() : video.GetMediaStreams())
                 {
                     if (!mediaStream.IsExternal)
                     {
@@ -238,7 +247,10 @@ namespace MediaBrowser.Providers.MediaInfo
             }
 
             // Download and insert external streams before the streams from the file to preserve stream IDs on remote videos
-            await AddExternalSubtitlesAsync(video, mediaStreams, options, cancellationToken).ConfigureAwait(false);
+            var subtitleFiles = await AddExternalSubtitlesAsync(video, mediaStreams, options, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+            video.AudioFiles = audioFiles;
+            video.SubtitleFiles = subtitleFiles;
 
             for (var i = 0; i < mediaStreams.Count; i++)
             {
@@ -249,6 +261,15 @@ namespace MediaBrowser.Providers.MediaInfo
 
             if (mediaInfo is not null)
             {
+                video.TotalBitrate = mediaInfo.Bitrate;
+                video.RunTimeTicks = mediaInfo.RunTimeTicks;
+                video.Container = mediaInfo.Container;
+                var videoType = video.VideoType;
+                if (videoType == VideoType.BluRay || videoType == VideoType.Dvd)
+                {
+                    video.Size = mediaInfo.Size;
+                }
+
                 FetchEmbeddedInfo(video, mediaInfo, options, libraryOptions);
                 FetchPeople(video, mediaInfo, options);
                 video.Timestamp = mediaInfo.Timestamp;
@@ -269,8 +290,19 @@ namespace MediaBrowser.Providers.MediaInfo
 
             var videoStream = mediaStreams.FirstOrDefault(i => i.Type == MediaStreamType.Video);
 
-            video.Height = videoStream?.Height ?? 0;
-            video.Width = videoStream?.Width ?? 0;
+            if (mediaInfo is null && options.MediaSourceChanged)
+            {
+                video.RunTimeTicks = null;
+                video.TotalBitrate = null;
+                video.Container = null;
+                video.Timestamp = null;
+            }
+
+            if (mediaInfo is not null || options.MediaSourceChanged)
+            {
+                video.Height = videoStream?.Height ?? 0;
+                video.Width = videoStream?.Width ?? 0;
+            }
 
             video.DefaultVideoStreamIndex = videoStream?.Index;
 
@@ -278,10 +310,13 @@ namespace MediaBrowser.Providers.MediaInfo
 
             _mediaStreamRepository.SaveMediaStreams(video.Id, mediaStreams, cancellationToken);
 
-            _mediaAttachmentRepository.SaveMediaAttachments(video.Id, mediaAttachments, cancellationToken);
+            if (mediaInfo is not null || options.MediaSourceChanged)
+            {
+                _mediaAttachmentRepository.SaveMediaAttachments(video.Id, mediaAttachments, cancellationToken);
+            }
 
-            if (options.MetadataRefreshMode == MetadataRefreshMode.FullRefresh
-                || options.MetadataRefreshMode == MetadataRefreshMode.Default)
+            if ((mediaInfo is not null || options.MediaSourceChanged) && (options.MetadataRefreshMode == MetadataRefreshMode.FullRefresh
+                || options.MetadataRefreshMode == MetadataRefreshMode.Default))
             {
                 if (_config.Configuration.DummyChapterDuration > 0 && chapters.Length <= 1 && mediaStreams.Any(i => i.Type == MediaStreamType.Video))
                 {
@@ -293,7 +328,7 @@ namespace MediaBrowser.Providers.MediaInfo
                 var extractDuringScan = false;
                 if (libraryOptions is not null)
                 {
-                    extractDuringScan = libraryOptions.ExtractChapterImagesDuringLibraryScan;
+                    extractDuringScan = !options.RefreshMediaInfoOnly && libraryOptions.ExtractChapterImagesDuringLibraryScan;
                 }
 
                 await _chapterManager.RefreshChapterImages(video, options.DirectoryService, chapters, extractDuringScan, false, cancellationToken).ConfigureAwait(false);
@@ -549,7 +584,7 @@ namespace MediaBrowser.Providers.MediaInfo
         /// <param name="options">The refreshOptions.</param>
         /// <param name="cancellationToken">The cancellation token.</param>
         /// <returns>Task.</returns>
-        private async Task AddExternalSubtitlesAsync(
+        private async Task<string[]> AddExternalSubtitlesAsync(
             Video video,
             List<MediaStream> currentStreams,
             MetadataRefreshOptions options,
@@ -557,8 +592,8 @@ namespace MediaBrowser.Providers.MediaInfo
         {
             var externalSubtitleStreams = await _subtitleResolver.GetExternalStreamsAsync(video, 0, options.DirectoryService, false, cancellationToken).ConfigureAwait(false);
 
-            var enableSubtitleDownloading = options.MetadataRefreshMode == MetadataRefreshMode.Default ||
-                                            options.MetadataRefreshMode == MetadataRefreshMode.FullRefresh;
+            var enableSubtitleDownloading = !options.RefreshMediaInfoOnly
+                && (options.MetadataRefreshMode == MetadataRefreshMode.Default || options.MetadataRefreshMode == MetadataRefreshMode.FullRefresh);
 
             var libraryOptions = _libraryManager.GetLibraryOptions(video);
 
@@ -585,9 +620,8 @@ namespace MediaBrowser.Providers.MediaInfo
                 }
             }
 
-            video.SubtitleFiles = externalSubtitleStreams.Select(i => i.Path).Distinct().ToArray();
-
             currentStreams.InsertRange(0, externalSubtitleStreams);
+            return externalSubtitleStreams.Select(i => i.Path).Distinct().ToArray();
         }
 
         /// <summary>
@@ -597,7 +631,7 @@ namespace MediaBrowser.Providers.MediaInfo
         /// <param name="currentStreams">The current streams.</param>
         /// <param name="options">The refreshOptions.</param>
         /// <param name="cancellationToken">The cancellation token.</param>
-        private async Task AddExternalAudioAsync(
+        private async Task<string[]> AddExternalAudioAsync(
             Video video,
             List<MediaStream> currentStreams,
             MetadataRefreshOptions options,
@@ -605,9 +639,8 @@ namespace MediaBrowser.Providers.MediaInfo
         {
             var externalAudioStreams = await _audioResolver.GetExternalStreamsAsync(video, 0, options.DirectoryService, false, cancellationToken).ConfigureAwait(false);
 
-            video.AudioFiles = externalAudioStreams.Select(i => i.Path).Distinct().ToArray();
-
             currentStreams.AddRange(externalAudioStreams);
+            return externalAudioStreams.Select(i => i.Path).Distinct().ToArray();
         }
 
         /// <summary>
